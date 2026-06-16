@@ -28,12 +28,19 @@
     "enableThinking": false,
     "timeoutMs": 60000,
     "candidatePickCount": 5,
-    "candidateMaxAgeMs": 600000
+    "candidateMaxAgeMs": 600000,
+    "keyPool": { "rotateOnRateLimit": true, "maxKeyRetries": 3, "backoffMs": 1000 }
   },
 
-  "signalSources": ["dexscreener", "jupiter"],
-  "gmgnEnabled": true,
-  "signalServerEnabled": false,
+  "sources": {
+    "dexscreener":   { "enabled": true,  "kind": "discovery" },
+    "gmgn":          { "enabled": false, "kind": "discovery" },
+    "signalServer":  { "enabled": false, "kind": "discovery" },
+    "jupiterPrice":  { "enabled": true,  "kind": "enrichment" },
+    "heliusHolders": { "enabled": true,  "kind": "enrichment" }
+  },
+  "debugRawLogging": true,
+  "scoring": { "wLiquidity": 0.4, "wVolume": 0.4, "wAge": 0.2, "topN": 10 },
 
   "strategy": {
     "active": "trendFollowing",

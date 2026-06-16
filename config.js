@@ -110,6 +110,19 @@ function loadConfig() {
     );
   }
 
+  // sources block — at least one discovery source must be enabled
+  const sources = cfg.sources;
+  if (!sources) {
+    throw new Error("sources block required in user-config.json.");
+  }
+  const discoverySources = Object.keys(sources).filter(
+    (k) => sources[k].kind === "discovery"
+  );
+  const hasEnabledDiscovery = discoverySources.some((k) => sources[k].enabled === true);
+  if (!hasEnabledDiscovery) {
+    throw new Error("No discovery source enabled. Enable at least one (e.g. dexscreener) in user-config.json sources.");
+  }
+
   return cfg;
 }
 

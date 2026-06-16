@@ -6,7 +6,9 @@
   "type": "commonjs",
   "scripts": {
     "start": "node index.js",
-    "config:check": "node -e \"require('./config').loadConfig(); console.log('config OK')\""
+    "config:check": "node -e \"require('./config').loadConfig(); console.log('config OK')\"",
+    "scan": "node index.js scan",
+    "llm:test": "node llm.js --test"
   },
   "dependencies": {
     "dotenv": "^16.4.7",

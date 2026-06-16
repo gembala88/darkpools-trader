@@ -37,7 +37,7 @@ Solana trading bot — profit from price increases, separate from LP project.
 | Phase | Area | Status |
 |-------|------|--------|
 | 1 | Scaffold + safety config + merged env | ✅ Done |
-| 2 | Signal sources + shared safety filter | |
+| 2 | Signal sources + shared safety filter + key pool LLM | ✅ Done |
 | 3 | Indicators + pluggable strategy (Trend Following MVP) | |
 | 4 | LLM decision layer + agent loop | |
 | 5 | SQLite database + execution (dry/confirm/live) | |

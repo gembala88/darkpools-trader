@@ -1,1 +1,6 @@
-module.exports = {}; // TODO Phase 2: GMGN enrichment (fallback to Jupiter if disabled)
+async function fetchTrending() {
+  console.log("gmgn disabled/no key — skipping");
+  return [];
+}
+
+module.exports = { fetchTrending };
