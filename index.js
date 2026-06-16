@@ -1,3 +1,4 @@
+require("dotenv").config();
 const { loadConfig } = require("./config");
 const { scan } = require("./tools/screening");
 
