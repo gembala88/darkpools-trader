@@ -1,0 +1,75 @@
+{
+  "mode": "dry_run",
+  "confirmLiveTrading": false,
+
+  "positionSizeSol": 0.05,
+  "maxConcurrentPositions": 1,
+  "liveMinSolReserve": 0.05,
+
+  "takeProfitPct": 20,
+  "stopLossPct": -8,
+  "trailingEnabled": true,
+  "maxHoldHours": 12,
+
+  "dailyLossLimitPct": -5,
+  "cooldownMinutesBetweenTrades": 30,
+  "maxTradesPerDay": 6,
+
+  "positionCheckMs": 10000,
+  "signalPollMs": 30000,
+
+  "llm": {
+    "enabled": true,
+    "provider": "nvidia",
+    "baseUrl": "https://integrate.api.nvidia.com/v1",
+    "model": "meta/llama-3.3-70b-instruct",
+    "temperature": 0.2,
+    "maxTokens": 1024,
+    "enableThinking": false,
+    "timeoutMs": 60000,
+    "candidatePickCount": 5,
+    "candidateMaxAgeMs": 600000
+  },
+
+  "signalSources": ["dexscreener", "jupiter"],
+  "gmgnEnabled": true,
+  "signalServerEnabled": false,
+
+  "strategy": {
+    "active": "trendFollowing",
+    "available": ["trendFollowing"]
+  },
+
+  "trending": {
+    "enabled": true,
+    "source": "jupiter",
+    "interval": "1m",
+    "limit": 10,
+    "orderBy": "volume",
+    "minVolumeUsd": 20000,
+    "minSwaps": 5,
+    "maxRugRatio": 0.2,
+    "maxBundlerRate": 0.3,
+    "allowDegen": false,
+    "acknowledgeDegenRisk": false,
+    "pollMs": 30000,
+    "lookbackMs": 600000
+  },
+
+  "graduated": {
+    "enabled": false,
+    "pollMs": 30000,
+    "lookbackMs": 600000,
+    "minFeeClaimSol": 0.5
+  },
+
+  "filters": {
+    "minLiquidityUsd": 50000,
+    "minVolume24hUsd": 20000,
+    "minTokenAgeHours": 24,
+    "maxTopHolderPct": 25,
+    "maxBotPct": 30,
+    "maxBundlePct": 20,
+    "maxInsiderConcentrationPct": 25
+  }
+}

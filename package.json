@@ -1,0 +1,18 @@
+{
+  "name": "darkpools-trader",
+  "version": "0.1.0",
+  "description": "Solana trading bot — profit from price increases, separate from LP project",
+  "main": "index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node index.js",
+    "config:check": "node -e \"require('./config').loadConfig(); console.log('config OK')\""
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "axios": "^1.7.9",
+    "better-sqlite3": "^11.7.0"
+  },
+  "keywords": ["solana", "trading", "bot"],
+  "license": "MIT"
+}
