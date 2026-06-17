@@ -49,26 +49,31 @@ async function scan(config) {
   }
 
   // deterministic scoring within batch
+  function median(arr) {
+    const sorted = [...arr].sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    return sorted.length % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+  }
+
+  const liqValues = withTiming.map((p) => p.candidate.liquidityUsd || 0);
+  const volValues = withTiming.map((p) => p.candidate.volume24hUsd || 0);
+  const medianLiq = median(liqValues) || 1;
+  const medianVol = median(volValues) || 1;
+  const minAge = config.filters?.minTokenAgeHours || 1;
+
   const withScores = withTiming.map((item) => {
     const c = item.candidate;
     const w = config.scoring;
 
-    const maxLiquidity = Math.max(
-      ...withTiming.map((p) => p.candidate.liquidityUsd || 0),
-      1
-    );
-    const maxVolume = Math.max(
-      ...withTiming.map((p) => p.candidate.volume24hUsd || 0),
-      1
-    );
-    const maxAge = Math.max(
-      ...withTiming.map((p) => p.candidate.ageHours || 0),
-      1
-    );
-
-    const liqScore = c.liquidityUsd ? c.liquidityUsd / maxLiquidity : 0;
-    const volScore = c.volume24hUsd ? c.volume24hUsd / maxVolume : 0;
-    const ageScore = c.ageHours ? c.ageHours / maxAge : 0;
+    const liqScore = c.liquidityUsd
+      ? Math.min(c.liquidityUsd / (medianLiq * 3), 1)
+      : 0;
+    const volScore = c.volume24hUsd
+      ? Math.min(c.volume24hUsd / (medianVol * 3), 1)
+      : 0;
+    const ageScore = c.ageHours
+      ? Math.min(c.ageHours / (minAge * 4), 1)
+      : 0;
 
     const score =
       (w.wLiquidity || 0) * liqScore +

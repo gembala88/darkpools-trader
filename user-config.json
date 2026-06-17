@@ -34,7 +34,7 @@
   "positionSizeSol": 0.05,
   "maxConcurrentPositions": 1,
   "liveMinSolReserve": 0.05,
-  "takeProfitPct": 20,
+  "takeProfitPct": 22,
   "stopLossPct": -8,
   "trailingEnabled": true,
   "maxHoldHours": 6,
