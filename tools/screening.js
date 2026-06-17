@@ -4,6 +4,7 @@ const signals = require("./signals/index");
 const candles = require("./signals/candles");
 const strategy = require("../strategies/index");
 const safety = require("./filters/safety");
+const agent = require("../agent");
 
 async function scan(config) {
   const candidates = await signals.getCandidates(config);
@@ -87,7 +88,10 @@ async function scan(config) {
   const topN = config.scoring.topN || 10;
   const ranked = withScores.slice(0, topN);
 
-  const result = { scannedCount, safeCount, skippedPerCheck, ranked };
+  // LLM decision
+  const decision = await agent.decide(ranked, config);
+
+  const result = { scannedCount, safeCount, skippedPerCheck, ranked, decision };
 
   // log summary
   console.log("\n=== SCAN RESULT ===");

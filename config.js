@@ -123,6 +123,11 @@ function loadConfig() {
     throw new Error("No discovery source enabled. Enable at least one (e.g. dexscreener) in user-config.json sources.");
   }
 
+  // decision block
+  if (!cfg.decision || !Array.isArray(cfg.decision.eligibleTimings) || cfg.decision.eligibleTimings.length === 0) {
+    throw new Error("decision.eligibleTimings must be a non-empty array in user-config.json.");
+  }
+
   // strategy block
   const strategy = cfg.strategy;
   if (!strategy || !strategy.active) {

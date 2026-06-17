@@ -40,6 +40,11 @@
     "heliusHolders": { "enabled": true,  "kind": "enrichment" },
     "geckoterminalOhlc": { "enabled": true, "kind": "enrichment" }
   },
+  "decision": {
+    "eligibleTimings": ["go"],
+    "maxCandidatesToLLM": 5,
+    "minConfidence": 0.0
+  },
   "debugRawLogging": true,
   "scoring": { "wLiquidity": 0.4, "wVolume": 0.4, "wAge": 0.2, "topN": 10 },
 
