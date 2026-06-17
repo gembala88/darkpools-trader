@@ -1,26 +1,52 @@
 {
   "mode": "dry_run",
   "confirmLiveTrading": false,
-
-  "accountSizeSol": 1.0,
-  "dayBoundary": "utc",
+  "accountSizeSol": 1,
+  "dayBoundary": "Asia/Jakarta",
+  "telegramEnabled": true,
+  "telegram": {
+    "mirrorToChannel": true,
+    "pinOnEntry": true,
+    "notify": {
+      "onStart": true,
+      "onError": true,
+      "onEntry": true,
+      "onExit": true,
+      "dailySummary": true,
+      "onScreening": false
+    }
+  },
+  "configSettableWhitelist": [
+    "takeProfitPct",
+    "stopLossPct",
+    "trailingEnabled",
+    "maxHoldHours",
+    "dailyLossLimitPct",
+    "cooldownMinutesBetweenTrades",
+    "maxTradesPerDay",
+    "accountSizeSol",
+    "positionSizeSol",
+    "telegramEnabled",
+    "strategy.trendFollowing.rsiMin",
+    "strategy.trendFollowing.rsiMax",
+    "decision.eligibleTimings"
+  ],
   "positionSizeSol": 0.05,
   "maxConcurrentPositions": 1,
   "liveMinSolReserve": 0.05,
-
   "takeProfitPct": 20,
   "stopLossPct": -8,
   "trailingEnabled": true,
   "maxHoldHours": 6,
-
   "dailyLossLimitPct": -15,
   "cooldownMinutesBetweenTrades": 10,
   "maxTradesPerDay": 0,
-  "loseStreak": { "threshold": 5, "cooldownMinutes": 60 },
-
+  "loseStreak": {
+    "threshold": 5,
+    "cooldownMinutes": 60
+  },
   "positionCheckMs": 10000,
   "signalPollMs": 30000,
-
   "llm": {
     "enabled": true,
     "provider": "nvidia",
@@ -32,16 +58,37 @@
     "timeoutMs": 60000,
     "candidatePickCount": 5,
     "candidateMaxAgeMs": 600000,
-    "keyPool": { "rotateOnRateLimit": true, "maxKeyRetries": 3, "backoffMs": 1000 }
+    "keyPool": {
+      "rotateOnRateLimit": true,
+      "maxKeyRetries": 3,
+      "backoffMs": 1000
+    }
   },
-
   "sources": {
-    "dexscreener":   { "enabled": true,  "kind": "discovery" },
-    "gmgn":          { "enabled": false, "kind": "discovery" },
-    "signalServer":  { "enabled": false, "kind": "discovery" },
-    "jupiterPrice":  { "enabled": true,  "kind": "enrichment" },
-    "heliusHolders": { "enabled": true,  "kind": "enrichment" },
-    "geckoterminalOhlc": { "enabled": true, "kind": "enrichment" }
+    "dexscreener": {
+      "enabled": true,
+      "kind": "discovery"
+    },
+    "gmgn": {
+      "enabled": false,
+      "kind": "discovery"
+    },
+    "signalServer": {
+      "enabled": false,
+      "kind": "discovery"
+    },
+    "jupiterPrice": {
+      "enabled": true,
+      "kind": "enrichment"
+    },
+    "heliusHolders": {
+      "enabled": true,
+      "kind": "enrichment"
+    },
+    "geckoterminalOhlc": {
+      "enabled": true,
+      "kind": "enrichment"
+    }
   },
   "execution": {
     "slippagePctPerSide": 3,
@@ -51,22 +98,30 @@
     "trailing": {
       "mode": "fixed",
       "fixedPct": 10,
-      "atrMultiplier": 2.0
+      "atrMultiplier": 2
     },
     "loopScanMs": 30000,
     "loopMonitorMs": 10000
   },
   "decision": {
-    "eligibleTimings": ["go"],
+    "eligibleTimings": [
+      "go"
+    ],
     "maxCandidatesToLLM": 5,
-    "minConfidence": 0.0
+    "minConfidence": 0
   },
   "debugRawLogging": true,
-  "scoring": { "wLiquidity": 0.4, "wVolume": 0.4, "wAge": 0.2, "topN": 10 },
-
+  "scoring": {
+    "wLiquidity": 0.4,
+    "wVolume": 0.4,
+    "wAge": 0.2,
+    "topN": 10
+  },
   "strategy": {
     "active": "trendFollowing",
-    "available": ["trendFollowing"],
+    "available": [
+      "trendFollowing"
+    ],
     "trendFollowing": {
       "emaFast": 20,
       "emaSlow": 50,
@@ -79,7 +134,6 @@
       "minCandles": 60
     }
   },
-
   "trending": {
     "enabled": true,
     "source": "jupiter",
@@ -95,14 +149,12 @@
     "pollMs": 30000,
     "lookbackMs": 600000
   },
-
   "graduated": {
     "enabled": false,
     "pollMs": 30000,
     "lookbackMs": 600000,
     "minFeeClaimSol": 0.5
   },
-
   "filters": {
     "minLiquidityUsd": 50000,
     "minVolume24hUsd": 20000,

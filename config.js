@@ -127,8 +127,15 @@ function loadConfig() {
   if (cfg.accountSizeSol == null || cfg.accountSizeSol <= 0) {
     throw new Error("accountSizeSol must be > 0 in user-config.json.");
   }
-  if (cfg.dayBoundary && !["utc", "local"].includes(cfg.dayBoundary)) {
-    throw new Error('dayBoundary must be "utc" or "local" in user-config.json.');
+  if (cfg.dayBoundary) {
+    const validTz = ["utc", "local"];
+    try {
+      Intl.DateTimeFormat(undefined, { timeZone: cfg.dayBoundary });
+      validTz.push(cfg.dayBoundary);
+    } catch {}
+    if (!validTz.includes(cfg.dayBoundary)) {
+      throw new Error(`dayBoundary must be "utc", "local", or a valid IANA timezone (got "${cfg.dayBoundary}").`);
+    }
   }
   if (cfg.cooldownMinutesBetweenTrades == null || cfg.cooldownMinutesBetweenTrades < 0) {
     throw new Error("cooldownMinutesBetweenTrades must be >= 0 in user-config.json.");
@@ -174,4 +181,74 @@ function loadConfig() {
   return cfg;
 }
 
-module.exports = { HARD_CAPS, loadConfig };
+function getConfigView(cfg) {
+  if (!cfg) cfg = loadConfig();
+  const lines = [
+    `mode=${cfg.mode} | confirmLive=${cfg.confirmLiveTrading}`,
+    `accountSize=${cfg.accountSizeSol} SOL | positionSize=${cfg.positionSizeSol} SOL | maxConcurrent=${cfg.maxConcurrentPositions}`,
+    `TP=${cfg.takeProfitPct}% | SL=${cfg.stopLossPct}% | trailing=${cfg.trailingEnabled} | maxHold=${cfg.maxHoldHours}h`,
+    `dailyLossLimit=${cfg.dailyLossLimitPct}% | cooldown=${cfg.cooldownMinutesBetweenTrades}m | maxTradesPerDay=${cfg.maxTradesPerDay}`,
+    `loseStreak=${cfg.loseStreak?.threshold}x/${cfg.loseStreak?.cooldownMinutes}m`,
+    `strategy=${cfg.strategy?.active}`,
+    `sources: dexscreener=${cfg.sources?.dexscreener?.enabled} gmgn=${cfg.sources?.gmgn?.enabled} signalServer=${cfg.sources?.signalServer?.enabled}`,
+    `llm: enabled=${cfg.llm?.enabled} provider=${cfg.llm?.provider} model=${cfg.llm?.model}`,
+    `telegram=${cfg.telegramEnabled} dayBoundary=${cfg.dayBoundary}`,
+    `eligibleTimings=[${cfg.decision?.eligibleTimings?.join(",") || ""}]`,
+  ];
+  return lines.join("\n");
+}
+
+function setConfigValue(path, value) {
+  const fs = require("fs");
+  const cfgPath = require("path").resolve(__dirname, "user-config.json");
+  const cfg = loadConfig();
+  const whitelist = cfg.configSettableWhitelist || [];
+
+  if (!whitelist.includes(path)) {
+    throw new Error(`blocked: change "${path}" in user-config.json directly (safety)`);
+  }
+
+  // parse value
+  let parsedValue;
+  try {
+    parsedValue = JSON.parse(value);
+  } catch {
+    parsedValue = value; // keep as string
+  }
+
+  // apply to a COPY and validate
+  const copy = JSON.parse(JSON.stringify(cfg));
+  const keys = path.split(".");
+  let obj = copy;
+  for (let i = 0; i < keys.length - 1; i++) {
+    if (obj[keys[i]] == null) obj[keys[i]] = {};
+    obj = obj[keys[i]];
+  }
+  obj[keys[keys.length - 1]] = parsedValue;
+
+  // run validation by re-reading from a temp write
+  const tmpPath = cfgPath + ".tmp";
+  fs.writeFileSync(tmpPath, JSON.stringify(copy, null, 2));
+  try {
+    // reload to trigger validation
+    const { loadConfig } = require("./config");
+    // temporarily swap the file
+    const original = fs.readFileSync(cfgPath, "utf-8");
+    fs.writeFileSync(cfgPath, fs.readFileSync(tmpPath, "utf-8"));
+    try {
+      loadConfig(); // throws if invalid
+    } finally {
+      fs.writeFileSync(cfgPath, original);
+    }
+  } finally {
+    try { fs.unlinkSync(tmpPath); } catch {}
+  }
+
+  // write for real
+  cfg[keys[0]] = copy[keys[0]];
+  // reload full config from copy (in case top-level keys changed)
+  fs.writeFileSync(cfgPath, JSON.stringify(copy, null, 2));
+  return parsedValue;
+}
+
+module.exports = { HARD_CAPS, loadConfig, getConfigView, setConfigValue };

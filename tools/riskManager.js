@@ -8,6 +8,7 @@ function _defaultState() {
     dayKey: null,
     tradesToday: 0,
     realizedPnlTodaySol: 0,
+    yesterdayPnlSol: 0,
     lastTradeTime: 0,
     consecutiveLosses: 0,
     loseStreakUntil: 0,
@@ -35,15 +36,30 @@ function saveState(state) {
 
 function _getDayKey(config) {
   const now = new Date();
-  if (config.dayBoundary === "local") {
+  const tz = config.dayBoundary;
+  if (!tz || tz === "utc") {
+    return `${now.getUTCFullYear()}-${now.getUTCMonth() + 1}-${now.getUTCDate()}`;
+  }
+  if (tz === "local") {
     return `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}`;
   }
-  return `${now.getUTCFullYear()}-${now.getUTCMonth() + 1}-${now.getUTCDate()}`;
+  // IANA timezone (e.g. Asia/Jakarta)
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: tz,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(now);
+  const year = parts.find((p) => p.type === "year")?.value;
+  const month = parts.find((p) => p.type === "month")?.value;
+  const day = parts.find((p) => p.type === "day")?.value;
+  return `${year}-${month}-${day}`;
 }
 
 function rolloverIfNewDay(state, config) {
   const newKey = _getDayKey(config);
   if (state.dayKey !== newKey) {
+    state.yesterdayPnlSol = state.realizedPnlTodaySol;
     state.dayKey = newKey;
     state.tradesToday = 0;
     state.realizedPnlTodaySol = 0;
