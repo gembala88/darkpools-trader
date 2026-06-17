@@ -41,7 +41,7 @@ Solana trading bot — profit from price increases, separate from LP project.
 | 3 | Indicators + pluggable strategy (Trend Following MVP) | ✅ Done |
 | 4 | LLM decision layer + agent loop | ✅ Done |
 | 5 | Dry-run execution sim + mechanical exits + honest costs & PnL | ✅ Done |
-| 6 | Risk manager (daily loss, cooldown, kill switch) | |
+| 6 | Risk manager (daily loss, cooldown, lose-streak, kill switch) | ✅ Done |
 | 7 | Trade memory (dry/live strictly separate) | |
 | 8 | Telegram notifications | |
 | 9 | Production hardening, PM2, monitoring | |

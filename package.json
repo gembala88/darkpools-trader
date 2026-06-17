@@ -9,9 +9,12 @@
     "config:check": "node -e \"require('./config').loadConfig(); console.log('config OK')\"",
     "scan": "node index.js scan",
     "bot": "node index.js run",
+    "stop": "node index.js stop",
+    "resume": "node index.js resume",
     "llm:test": "node llm.js --test",
     "indicators:test": "node tools/indicators.js --test",
-    "sim:test": "node tools/positions.js --test"
+    "sim:test": "node tools/positions.js --test",
+    "risk:test": "node tools/riskManager.js --test"
   },
   "dependencies": {
     "dotenv": "^16.4.7",

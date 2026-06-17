@@ -2,22 +2,29 @@ require("dotenv").config();
 const { loadConfig } = require("./config");
 const { scan } = require("./tools/screening");
 const positions = require("./tools/positions");
+const riskManager = require("./tools/riskManager");
 
 const cfg = loadConfig();
+
+// one-shot commands
+if (process.argv.includes("stop")) {
+  riskManager.setKillSwitch(true);
+  process.exit(0);
+}
+if (process.argv.includes("resume")) {
+  riskManager.setKillSwitch(false);
+  process.exit(0);
+}
 
 async function runLoop() {
   console.log("darkpools-trader | mode:", cfg.mode, "| starting dry_run loop");
 
-  // restore open positions
   const openPositions = positions.loadOpenPositions();
-
   const loopScanMs = cfg.execution.loopScanMs || 30000;
   const loopMonitorMs = cfg.execution.loopMonitorMs || 10000;
 
-  // track positions in memory
   let currentPosition = openPositions[0] || null;
 
-  // handle graceful shutdown
   process.on("SIGINT", () => {
     console.log("\nSIGINT received — state saved, exiting cleanly");
     process.exit(0);
@@ -29,9 +36,8 @@ async function runLoop() {
   while (true) {
     const now = Date.now();
 
-    // monitor if position open
+    // monitor if position open (ALWAYS allowed, regardless of gate/kill switch)
     if (currentPosition) {
-      // refresh from disk to get latest state
       const allOpen = positions.loadOpenPositions();
       currentPosition = allOpen.find(
         (p) =>
@@ -43,7 +49,6 @@ async function runLoop() {
         currentPosition = null;
         console.log("Position closed, ready for next entry");
       } else {
-        // fetch current price (use Jupiter price or similar)
         let currentPrice = null;
         try {
           const axios = require("axios");
@@ -74,6 +79,7 @@ async function runLoop() {
           );
           if (reason) {
             if (reason.type === "partialTP") {
+              const exitPnlBefore = currentPosition.realizedPnlSol;
               positions.partialClose(
                 currentPosition,
                 cfg.execution.partialTpSellPct,
@@ -81,7 +87,11 @@ async function runLoop() {
                 currentPrice,
                 cfg
               );
-              // reload after partial close
+              // record partial close PnL
+              const exitPnl = currentPosition.exits[currentPosition.exits.length - 1].pnlSol;
+              const riskState = riskManager.loadState();
+              riskManager.recordTradeClosed(riskState, exitPnl, false, cfg);
+
               const allOpen2 = positions.loadOpenPositions();
               currentPosition = allOpen2.find(
                 (p) =>
@@ -89,12 +99,17 @@ async function runLoop() {
                   p.entryTime === currentPosition.entryTime
               );
             } else {
+              const posTotalPnl = currentPosition.realizedPnlSol;
               positions.closeRemaining(
                 currentPosition,
                 reason,
                 currentPrice,
                 cfg
               );
+              // record full close PnL (total position PnL)
+              const finalPnl = currentPosition.realizedPnlSol;
+              const riskState = riskManager.loadState();
+              riskManager.recordTradeClosed(riskState, finalPnl - posTotalPnl, true, cfg);
               currentPosition = null;
               console.log("Position fully closed");
             }
@@ -111,6 +126,17 @@ async function runLoop() {
     if (!currentPosition && now - lastScanTime > loopScanMs) {
       lastScanTime = now;
       console.log("Scanning for entry...");
+
+      // reload risk state from disk (so `npm run stop` in another terminal takes effect)
+      const riskState = riskManager.loadState();
+      riskManager.rolloverIfNewDay(riskState, cfg);
+
+      const gate = riskManager.canOpenNewPosition(riskState, cfg);
+      if (!gate.allowed) {
+        console.log(`ENTRY BLOCKED: ${gate.reason}`);
+        continue;
+      }
+
       try {
         const result = await scan(cfg);
         const decision = result.decision;
@@ -122,7 +148,6 @@ async function runLoop() {
           pickMint = decision.pick;
           pickCandidate = result.ranked.find((c) => c.mint === pickMint);
         } else {
-          // fallback: highest score with timing "go"
           const goCandidate = result.ranked.find(
             (c) => c.timing && c.timing.signal === "go"
           );
@@ -133,7 +158,6 @@ async function runLoop() {
         }
 
         if (pickMint && pickCandidate) {
-          // fetch current price
           let currentPrice = null;
           try {
             const axios = require("axios");
@@ -167,6 +191,9 @@ async function runLoop() {
               currentPrice,
               cfg
             );
+            if (currentPosition) {
+              riskManager.recordTradeOpened(riskState);
+            }
           }
         } else {
           console.log("No eligible candidate for entry this cycle");

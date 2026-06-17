@@ -123,6 +123,25 @@ function loadConfig() {
     throw new Error("No discovery source enabled. Enable at least one (e.g. dexscreener) in user-config.json sources.");
   }
 
+  // risk params
+  if (cfg.accountSizeSol == null || cfg.accountSizeSol <= 0) {
+    throw new Error("accountSizeSol must be > 0 in user-config.json.");
+  }
+  if (cfg.dayBoundary && !["utc", "local"].includes(cfg.dayBoundary)) {
+    throw new Error('dayBoundary must be "utc" or "local" in user-config.json.');
+  }
+  if (cfg.cooldownMinutesBetweenTrades == null || cfg.cooldownMinutesBetweenTrades < 0) {
+    throw new Error("cooldownMinutesBetweenTrades must be >= 0 in user-config.json.");
+  }
+  if (cfg.maxTradesPerDay == null || cfg.maxTradesPerDay < 0) {
+    throw new Error("maxTradesPerDay must be >= 0 (0 = unlimited) in user-config.json.");
+  }
+  if (cfg.loseStreak) {
+    if (cfg.loseStreak.threshold == null || cfg.loseStreak.threshold < 1) {
+      throw new Error("loseStreak.threshold must be >= 1 in user-config.json.");
+    }
+  }
+
   // execution block
   const exec = cfg.execution;
   if (!exec || exec.slippagePctPerSide == null || exec.slippagePctPerSide < 0 || exec.slippagePctPerSide > 50) {

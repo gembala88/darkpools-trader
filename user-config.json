@@ -2,6 +2,8 @@
   "mode": "dry_run",
   "confirmLiveTrading": false,
 
+  "accountSizeSol": 1.0,
+  "dayBoundary": "utc",
   "positionSizeSol": 0.05,
   "maxConcurrentPositions": 1,
   "liveMinSolReserve": 0.05,
@@ -11,9 +13,10 @@
   "trailingEnabled": true,
   "maxHoldHours": 6,
 
-  "dailyLossLimitPct": -5,
-  "cooldownMinutesBetweenTrades": 30,
-  "maxTradesPerDay": 6,
+  "dailyLossLimitPct": -15,
+  "cooldownMinutesBetweenTrades": 10,
+  "maxTradesPerDay": 0,
+  "loseStreak": { "threshold": 5, "cooldownMinutes": 60 },
 
   "positionCheckMs": 10000,
   "signalPollMs": 30000,
