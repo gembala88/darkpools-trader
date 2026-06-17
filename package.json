@@ -8,8 +8,10 @@
     "start": "node index.js",
     "config:check": "node -e \"require('./config').loadConfig(); console.log('config OK')\"",
     "scan": "node index.js scan",
+    "bot": "node index.js run",
     "llm:test": "node llm.js --test",
-    "indicators:test": "node tools/indicators.js --test"
+    "indicators:test": "node tools/indicators.js --test",
+    "sim:test": "node tools/positions.js --test"
   },
   "dependencies": {
     "dotenv": "^16.4.7",

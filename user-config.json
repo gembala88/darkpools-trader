@@ -9,7 +9,7 @@
   "takeProfitPct": 20,
   "stopLossPct": -8,
   "trailingEnabled": true,
-  "maxHoldHours": 12,
+  "maxHoldHours": 6,
 
   "dailyLossLimitPct": -5,
   "cooldownMinutesBetweenTrades": 30,
@@ -39,6 +39,19 @@
     "jupiterPrice":  { "enabled": true,  "kind": "enrichment" },
     "heliusHolders": { "enabled": true,  "kind": "enrichment" },
     "geckoterminalOhlc": { "enabled": true, "kind": "enrichment" }
+  },
+  "execution": {
+    "slippagePctPerSide": 3,
+    "entryMode": "auto",
+    "partialTpEnabled": true,
+    "partialTpSellPct": 50,
+    "trailing": {
+      "mode": "fixed",
+      "fixedPct": 10,
+      "atrMultiplier": 2.0
+    },
+    "loopScanMs": 30000,
+    "loopMonitorMs": 10000
   },
   "decision": {
     "eligibleTimings": ["go"],

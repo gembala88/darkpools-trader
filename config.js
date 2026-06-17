@@ -123,6 +123,17 @@ function loadConfig() {
     throw new Error("No discovery source enabled. Enable at least one (e.g. dexscreener) in user-config.json sources.");
   }
 
+  // execution block
+  const exec = cfg.execution;
+  if (!exec || exec.slippagePctPerSide == null || exec.slippagePctPerSide < 0 || exec.slippagePctPerSide > 50) {
+    throw new Error("execution.slippagePctPerSide must be 0..50 in user-config.json.");
+  }
+  if (exec.trailing) {
+    if (exec.trailing.mode === "fixed" && (exec.trailing.fixedPct == null || exec.trailing.fixedPct <= 0)) {
+      throw new Error("execution.trailing.fixedPct must be > 0 when mode is 'fixed'.");
+    }
+  }
+
   // decision block
   if (!cfg.decision || !Array.isArray(cfg.decision.eligibleTimings) || cfg.decision.eligibleTimings.length === 0) {
     throw new Error("decision.eligibleTimings must be a non-empty array in user-config.json.");
