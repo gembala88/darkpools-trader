@@ -100,8 +100,10 @@
       "fixedPct": 10,
       "atrMultiplier": 2
     },
-    "loopScanMs": 30000,
-    "loopMonitorMs": 10000
+    "loopScanMs": 60000,
+    "loopMonitorMs": 10000,
+    "candleCacheMs": 600000,
+    "candleRequestDelayMs": 2500
   },
   "decision": {
     "eligibleTimings": [
