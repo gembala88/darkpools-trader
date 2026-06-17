@@ -17,7 +17,9 @@
     "risk:test": "node tools/riskManager.js --test",
     "config:show": "node index.js config:show",
     "config:set": "node index.js config:set",
-    "telegram:test": "node tools/telegram.js --test"
+    "telegram:test": "node tools/telegram.js --test",
+    "report": "node index.js report",
+    "report:test": "node tools/reporter.js --test"
   },
   "dependencies": {
     "dotenv": "^16.4.7",

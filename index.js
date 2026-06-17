@@ -259,6 +259,20 @@ async function runLoop() {
   }
 }
 
+if (process.argv.includes("report")) {
+  const { buildReport, formatLines, loadAllPositions } = require("./tools/reporter");
+  const positions = loadAllPositions();
+  const report = buildReport(positions);
+  const lines = formatLines(report);
+
+  if (process.argv.includes("--json")) {
+    console.log(JSON.stringify(report, null, 2));
+  } else {
+    for (const l of lines) console.log(l);
+  }
+  process.exit(0);
+}
+
 if (process.argv.includes("scan")) {
   scan(cfg).then(() => process.exit(0)).catch((err) => {
     console.error("scan error:", err.message);
