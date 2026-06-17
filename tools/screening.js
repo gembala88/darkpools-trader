@@ -1,6 +1,8 @@
 const fs = require("fs");
 const path = require("path");
 const signals = require("./signals/index");
+const candles = require("./signals/candles");
+const strategy = require("../strategies/index");
 const safety = require("./filters/safety");
 
 async function scan(config) {
@@ -13,7 +15,6 @@ async function scan(config) {
   for (const c of candidates) {
     const result = await safety.applySafetyFilter(c, config);
 
-    // tally skips
     for (const check of result.checks) {
       if (check.result === "skip") {
         skippedPerCheck[check.name] = (skippedPerCheck[check.name] || 0) + 1;
@@ -27,21 +28,40 @@ async function scan(config) {
 
   const safeCount = passedCandidates.length;
 
+  // timing: fetch candles + run strategy for each safe candidate
+  const tfConfig = config.strategy.trendFollowing;
+  const strat = strategy.getActiveStrategy(config);
+  const withTiming = [];
+
+  for (const item of passedCandidates) {
+    const c = item.candidate;
+    let candleData = [];
+    if (config.sources.geckoterminalOhlc?.enabled && c.pairAddress) {
+      try {
+        candleData = await candles.getCandles(c, tfConfig);
+      } catch (err) {
+        console.log(`candles error for ${c.mint}: ${err.message}`);
+      }
+    }
+    const timing = strat.evaluate(c, candleData, tfConfig);
+    withTiming.push({ ...item, timing });
+  }
+
   // deterministic scoring within batch
-  const withScores = passedCandidates.map((item) => {
+  const withScores = withTiming.map((item) => {
     const c = item.candidate;
     const w = config.scoring;
 
     const maxLiquidity = Math.max(
-      ...passedCandidates.map((p) => p.candidate.liquidityUsd || 0),
+      ...withTiming.map((p) => p.candidate.liquidityUsd || 0),
       1
     );
     const maxVolume = Math.max(
-      ...passedCandidates.map((p) => p.candidate.volume24hUsd || 0),
+      ...withTiming.map((p) => p.candidate.volume24hUsd || 0),
       1
     );
     const maxAge = Math.max(
-      ...passedCandidates.map((p) => p.candidate.ageHours || 0),
+      ...withTiming.map((p) => p.candidate.ageHours || 0),
       1
     );
 
@@ -59,6 +79,7 @@ async function scan(config) {
       symbol: c.symbol,
       score: parseFloat(score.toFixed(4)),
       checks: item.checks,
+      timing: item.timing,
     };
   });
 
@@ -75,12 +96,19 @@ async function scan(config) {
     .map(([k, v]) => `${k}=${v}`)
     .join(", ");
   console.log(`Skipped-per-check: ${skipSummary || "none"}`);
-  console.log(`\nTop ${ranked.length} candidates:`);
+  console.log(`\nTop ${ranked.length} candidates (safe + timing):`);
   for (const r of ranked) {
     const fails = r.checks.filter((c) => c.result === "fail");
     const skips = r.checks.filter((c) => c.result === "skip");
+    const t = r.timing || {};
+    const ind = t.indicators || {};
+    const timingStr = `${t.signal || "?"}`;
+    const indStr =
+      ind.emaFast != null
+        ? ` EMA${ind.emaFast} EMA${ind.emaSlow} RSI${ind.rsi}`
+        : "";
     console.log(
-      `  ${r.symbol || "?"} (${r.mint.slice(0, 8)}...) score=${r.score}` +
+      `  ${r.symbol || "?"} (${r.mint.slice(0, 8)}...) score=${r.score} timing=${timingStr}${indStr}` +
         (fails.length ? ` FAILS: ${fails.map((f) => f.name).join(",")}` : "") +
         (skips.length ? ` SKIPS: ${skips.map((s) => `${s.name}`).join(",")}` : "")
     );

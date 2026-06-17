@@ -84,6 +84,8 @@ async function fetchTrending() {
         ageHours: pair.pairCreatedAt
           ? (Date.now() - new Date(pair.pairCreatedAt).getTime()) / 3600000
           : null,
+        pairAddress: pair.pairAddress || null,
+        dexId: pair.dexId || null,
         raw: { boost: t, pair },
       });
     } else {
@@ -98,6 +100,8 @@ async function fetchTrending() {
         volume24hUsd: null,
         pairCreatedAt: null,
         ageHours: null,
+        pairAddress: null,
+        dexId: null,
         raw: { boost: t },
       });
     }

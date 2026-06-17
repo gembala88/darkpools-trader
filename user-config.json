@@ -37,14 +37,26 @@
     "gmgn":          { "enabled": false, "kind": "discovery" },
     "signalServer":  { "enabled": false, "kind": "discovery" },
     "jupiterPrice":  { "enabled": true,  "kind": "enrichment" },
-    "heliusHolders": { "enabled": true,  "kind": "enrichment" }
+    "heliusHolders": { "enabled": true,  "kind": "enrichment" },
+    "geckoterminalOhlc": { "enabled": true, "kind": "enrichment" }
   },
   "debugRawLogging": true,
   "scoring": { "wLiquidity": 0.4, "wVolume": 0.4, "wAge": 0.2, "topN": 10 },
 
   "strategy": {
     "active": "trendFollowing",
-    "available": ["trendFollowing"]
+    "available": ["trendFollowing"],
+    "trendFollowing": {
+      "emaFast": 20,
+      "emaSlow": 50,
+      "rsiPeriod": 14,
+      "rsiMin": 55,
+      "rsiMax": 70,
+      "candleTimeframe": "hour",
+      "candleAggregate": 1,
+      "candleLimit": 120,
+      "minCandles": 60
+    }
   },
 
   "trending": {

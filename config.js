@@ -123,6 +123,19 @@ function loadConfig() {
     throw new Error("No discovery source enabled. Enable at least one (e.g. dexscreener) in user-config.json sources.");
   }
 
+  // strategy block
+  const strategy = cfg.strategy;
+  if (!strategy || !strategy.active) {
+    throw new Error("strategy.active required in user-config.json.");
+  }
+  if (!Array.isArray(strategy.available) || !strategy.available.includes(strategy.active)) {
+    throw new Error(`strategy.active "${strategy.active}" not in strategy.available [${(strategy.available || []).join(", ")}].`);
+  }
+  const activeParams = strategy[strategy.active];
+  if (!activeParams) {
+    throw new Error(`Strategy params block "strategy.${strategy.active}" missing in user-config.json.`);
+  }
+
   return cfg;
 }
 
