@@ -119,15 +119,15 @@ if (require.main === module && process.argv.includes("--test")) {
     const r1 = await assessRegime([], disabledCfg);
     assert("disabled: normal", r1.regime === "normal" && r1.reason === "disabled");
 
-    // 2. SOL change -10% (no breadth data, no candidates) -> risk_off on SOL alone
-    // We need to mock GMGN. Instead, bypass SOL via config:
-    // Actually, we test the logic directly by simulating assessRegime with solChangePct.
-    // Since GMGN is unavailable (no API key), SOL fetch will fail -> solChangePct null.
-    // With no candidates, breadth is also null -> "unknown" (fail-safe).
-    const r2 = await assessRegime([], cfg);
-    // GMGN will fail because no API key set -> solChangePct null, no candidates -> breadth null
-    // Both null -> "unknown"
-    assert("no SOL+no candidates: unknown (fail-safe)", r2.regime === "unknown");
+    // 2. SOL fetch fails + empty candidates -> "unknown" (fail-safe: no data = don't block)
+    const orig = gmgn.getTokenStats;
+    try {
+      gmgn.getTokenStats = async () => ({ available: false, reason: "mock fail" });
+      const r2 = await assessRegime([], cfg);
+      assert("no SOL+no candidates: unknown (fail-safe)", r2.regime === "unknown");
+    } finally {
+      gmgn.getTokenStats = orig;
+    }
 
     // 3. Breadth 80% down (6/8 down, sample >=5) -> risk_off on breadth
     const candidatesDown = [
@@ -175,17 +175,29 @@ if (require.main === module && process.argv.includes("--test")) {
     // sample = 2 (<5), breadth inconclusive -> only SOL could trigger
     assert("mixed data: not risk_off (sample too small)", r6.regime !== "risk_off");
 
-    // 7. Edge: enabled but unknown GMGN and empty candidates
-    const r7 = await assessRegime([], cfg);
-    assert("empty+no SOL: unknown", r7.regime === "unknown");
+    // 7. SOL fetch fails + empty candidates -> "unknown" (another entry point to same logic)
+    const orig7 = gmgn.getTokenStats;
+    try {
+      gmgn.getTokenStats = async () => ({ available: false, reason: "mock fail" });
+      const r7 = await assessRegime([], cfg);
+      assert("empty+no SOL: unknown", r7.regime === "unknown");
+    } finally {
+      gmgn.getTokenStats = orig7;
+    }
 
-    // 8. Extremely narrow threshold (solDropPct=0.01) + no price data -> unknown
-    const tightCfg = {
-      ...cfg,
-      marketRegime: { ...cfg.marketRegime, solDropPct: 0.01, breadthDownPct: 1 },
-    };
-    const r8 = await assessRegime([], tightCfg);
-    assert("tight config+no data: unknown", r8.regime === "unknown");
+    // 8. SOL fetch fails + empty candidates + extreme thresholds -> "unknown" (fail-safe)
+    const orig8 = gmgn.getTokenStats;
+    try {
+      gmgn.getTokenStats = async () => ({ available: false, reason: "mock fail" });
+      const tightCfg = {
+        ...cfg,
+        marketRegime: { ...cfg.marketRegime, solDropPct: 0.01, breadthDownPct: 1 },
+      };
+      const r8 = await assessRegime([], tightCfg);
+      assert("tight config+no data: unknown", r8.regime === "unknown");
+    } finally {
+      gmgn.getTokenStats = orig8;
+    }
 
     // ---- SOL-path mock tests ----
     const origGetTokenStats = gmgn.getTokenStats;
