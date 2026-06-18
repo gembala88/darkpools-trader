@@ -83,6 +83,7 @@ async function scan(config) {
     return {
       mint: c.mint,
       symbol: c.symbol,
+      candidate: c,
       score: parseFloat(score.toFixed(4)),
       checks: item.checks,
       timing: item.timing,
