@@ -46,15 +46,12 @@ async function runLoop() {
 
   console.log("darkpools-trader | mode:", cfg.mode, "| starting dry_run loop");
 
-  const openPositions = positions.loadOpenPositions();
-  const loopScanMs = cfg.execution.loopScanMs || 30000;
-  const loopMonitorMs = cfg.execution.loopMonitorMs || 10000;
+  let openPositions = positions.loadOpenPositions();
 
-  let currentPosition = openPositions[0] || null;
   let lastTelegramPoll = 0;
   let lastDailyCheckKey = null;
-  let lastLoggedPrice = null;
-  let lastLoggedPeak = null;
+  // per-position log suppression
+  const _posLogCache = {}; // mint -> { lastPrice, lastPeak }
 
   process.on("SIGINT", () => {
     console.log("\nSIGINT received — state saved, exiting cleanly");
@@ -88,87 +85,64 @@ async function runLoop() {
       await telegram.pollCommands();
     }
 
-    // monitor if position open (ALWAYS allowed, regardless of gate/kill switch)
-    if (currentPosition) {
-      if (currentPosition.status === "closed") {
-        currentPosition = null;
-        console.log("Position closed, ready for next entry");
-      } else {
-        let currentPrice = await jupiter.getUsdPrice(currentPosition.mint);
+    // monitor ALL open positions (ALWAYS allowed, regardless of gate/kill switch)
+    const maxConc = cfg.maxConcurrentPositions || 3;
+    for (let i = openPositions.length - 1; i >= 0; i--) {
+      const pos = openPositions[i];
+      if (pos.status === "closed") {
+        openPositions.splice(i, 1);
+        continue;
+      }
+      let currentPrice = await jupiter.getUsdPrice(pos.mint);
 
-        if (currentPrice != null) {
-          // evaluateExit raises peakPrice in-place
-          const reason = positions.evaluateExit(
-            currentPosition,
-            currentPrice,
-            null,
-            cfg
-          );
-          // persist the raised peakPrice immediately so trailing works across ticks
-          positions.savePosition(currentPosition);
+      if (currentPrice != null) {
+        const reason = positions.evaluateExit(pos, currentPrice, null, cfg);
+        positions.savePosition(pos);
 
-          if (reason) {
-            if (reason.type === "partialTP") {
-              positions.partialClose(
-                currentPosition,
-                cfg.execution.partialTpSellPct,
-                reason,
-                currentPrice,
-                cfg
-              );
-              const exitPnl = currentPosition.exits[currentPosition.exits.length - 1].pnlSol;
-              const riskState = riskManager.loadState();
-              riskManager.recordTradeClosed(riskState, exitPnl, false, cfg);
-              telegram.notifyExit(currentPosition, currentPosition.exits[currentPosition.exits.length - 1], false);
-
-              // check if partialClose fully closed the position
-              if (currentPosition.status === "closed") {
-                currentPosition = null;
-                console.log("Position fully closed");
-              }
-            } else {
-              const posTotalPnl = currentPosition.realizedPnlSol;
-              positions.closeRemaining(
-                currentPosition,
-                reason,
-                currentPrice,
-                cfg
-              );
-              const finalPnl = currentPosition.realizedPnlSol;
-              const riskState = riskManager.loadState();
-              riskManager.recordTradeClosed(riskState, finalPnl - posTotalPnl, true, cfg);
-              const lastExit = currentPosition.exits[currentPosition.exits.length - 1];
-              telegram.notifyExit(currentPosition, lastExit, true);
-              currentPosition = null;
-              console.log("Position fully closed");
+        if (reason) {
+          if (reason.type === "partialTP") {
+            positions.partialClose(pos, cfg.execution.partialTpSellPct, reason, currentPrice, cfg);
+            const exitPnl = pos.exits[pos.exits.length - 1].pnlSol;
+            const riskState = riskManager.loadState();
+            riskManager.recordTradeClosed(riskState, exitPnl, false, cfg);
+            telegram.notifyExit(pos, pos.exits[pos.exits.length - 1], false);
+            if (pos.status === "closed") {
+              openPositions.splice(i, 1);
+              console.log(`Position ${pos.symbol} fully closed`);
             }
           } else {
-            // only log when price or peak actually changed
-            const pStr = currentPrice.toFixed(8);
-            const pkStr = currentPosition.peakPrice.toFixed(8);
-            if (pStr !== lastLoggedPrice || pkStr !== lastLoggedPeak) {
-              console.log(
-                `monitor ${currentPosition.symbol}: $${pStr} peak $${pkStr}`
-              );
-              lastLoggedPrice = pStr;
-              lastLoggedPeak = pkStr;
-            }
+            const posTotalPnl = pos.realizedPnlSol;
+            positions.closeRemaining(pos, reason, currentPrice, cfg);
+            const finalPnl = pos.realizedPnlSol;
+            const riskState = riskManager.loadState();
+            riskManager.recordTradeClosed(riskState, finalPnl - posTotalPnl, true, cfg);
+            const lastExit = pos.exits[pos.exits.length - 1];
+            telegram.notifyExit(pos, lastExit, true);
+            openPositions.splice(i, 1);
+            console.log(`Position ${pos.symbol} fully closed`);
           }
         } else {
-          console.log("monitor: no price for " + currentPosition.symbol + " — will retry");
+          const cache = _posLogCache[pos.mint] || {};
+          const pStr = currentPrice.toFixed(8);
+          const pkStr = pos.peakPrice.toFixed(8);
+          if (pStr !== cache.lastPrice || pkStr !== cache.lastPeak) {
+            console.log(`monitor ${pos.symbol}: $${pStr} peak $${pkStr}`);
+            _posLogCache[pos.mint] = { lastPrice: pStr, lastPeak: pkStr };
+          }
         }
+      } else {
+        console.log(`monitor: no price for ${pos.symbol} — will retry`);
       }
     }
 
-    // scan if no position open
-    if (!currentPosition && now - lastScanTime > loopScanMs) {
+    // scan for entry if under max concurrent
+    if (openPositions.length < maxConc && now - lastScanTime > loopScanMs) {
       lastScanTime = now;
       console.log("Scanning for entry...");
 
       const riskState = riskManager.loadState();
       riskManager.rolloverIfNewDay(riskState, cfg);
 
-      // daily rollover notification
       await telegram.checkDailyRollover(riskState, cfg);
 
       const gate = riskManager.canOpenNewPosition(riskState, cfg);
@@ -180,9 +154,8 @@ async function runLoop() {
       try {
         const result = await scan(cfg);
 
-        // market regime filter — blocks ENTRY only, never exits
         const regime = await assessRegime(result.ranked, cfg);
-        result.regime = regime; // include in scan-log
+        result.regime = regime;
         if (regime.regime === "risk_off") {
           console.log(`ENTRY HELD: market risk_off (${regime.reason})`);
           continue;
@@ -192,13 +165,19 @@ async function runLoop() {
 
         let pickMint = null;
         let pickCandidate = null;
+        const heldMints = new Set(openPositions.map((p) => p.mint));
 
         if (decision && decision.called && decision.pick) {
-          pickMint = decision.pick;
-          pickCandidate = result.ranked.find((c) => c.mint === pickMint);
-        } else {
+          if (!heldMints.has(decision.pick)) {
+            pickMint = decision.pick;
+            pickCandidate = result.ranked.find((c) => c.mint === pickMint);
+          } else {
+            console.log(`LLM pick ${decision.pick.slice(0, 8)}... already held, skipping`);
+          }
+        }
+        if (!pickMint) {
           const goCandidate = result.ranked.find(
-            (c) => c.timing && c.timing.signal === "go"
+            (c) => c.timing && c.timing.signal === "go" && !heldMints.has(c.mint)
           );
           if (goCandidate) {
             pickMint = goCandidate.mint;
@@ -216,14 +195,15 @@ async function runLoop() {
                 mint: r.mint,
                 symbol: r.symbol,
               }))[0];
-            currentPosition = positions.openPosition(
+            const newPos = positions.openPosition(
               candidateData || { mint: pickMint, symbol: pickMint.slice(0, 8) },
               currentPrice,
               cfg
             );
-            if (currentPosition) {
+            if (newPos) {
+              openPositions.push(newPos);
               riskManager.recordTradeOpened(riskState);
-              telegram.notifyEntry(currentPosition);
+              telegram.notifyEntry(newPos);
             }
           } else {
             console.log("entry skipped: no price for " + (pickCandidate.symbol || pickMint));

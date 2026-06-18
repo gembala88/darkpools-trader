@@ -54,6 +54,11 @@ function openPosition(candidate, currentPrice, config) {
     return null;
   }
 
+  if (existing.some((p) => p.mint === candidate.mint)) {
+    console.log("openPosition: duplicate mint rejected");
+    return null;
+  }
+
   const slipPct = config.execution.slippagePctPerSide;
   const effectivePrice = _applySlippage(currentPrice, "buy", slipPct);
   const qty = config.positionSizeSol / effectivePrice;
@@ -206,7 +211,7 @@ if (require.main === module && process.argv.includes("--test")) {
   const config = {
     mode: "dry_run",
     positionSizeSol: 1,
-    maxConcurrentPositions: 1,
+    maxConcurrentPositions: 3,
     stopLossPct: -8,
     takeProfitPct: 20,
     maxHoldHours: 6,
@@ -302,6 +307,29 @@ if (require.main === module && process.argv.includes("--test")) {
   const exitEff = pos5.exits[0].priceEffective;
   const expectedExitEff = 0.90 * (1 - slip / 100);
   assert("exit price effective < quoted by slippage", Math.abs(exitEff - expectedExitEff) < 0.000001);
+
+  fs.writeFileSync(testFile, "[]");
+
+  // 7-9: multi-position (max 3 concurrent)
+  const openPositions = () => JSON.parse(fs.readFileSync(testFile, "utf-8")).filter((p) => p.status === "open");
+  const posA = openPosition({ mint: "TokenA", symbol: "A" }, 1.0, config);
+  assert("multi: open 1st position ok", posA !== null);
+  const posB = openPosition({ mint: "TokenB", symbol: "B" }, 1.0, config);
+  assert("multi: open 2nd position ok", posB !== null);
+  const posC = openPosition({ mint: "TokenC", symbol: "C" }, 1.0, config);
+  assert("multi: open 3rd position ok", posC !== null);
+  const posD = openPosition({ mint: "TokenD", symbol: "D" }, 1.0, config);
+  assert("multi: 4th position rejected (max 3)", posD === null);
+  const dupA = openPosition({ mint: "TokenA", symbol: "A" }, 1.0, config);
+  assert("multi: duplicate mint rejected", dupA === null);
+  assert("multi: exactly 3 open", openPositions().length === 3);
+
+  // Close one, verify slot freed
+  const closeR = evaluateExit(posA, 0.9, null, config);
+  closeRemaining(posA, closeR, 0.9, config);
+  assert("multi: posA closed", posA.status === "closed" && openPositions().length === 2);
+  const posE = openPosition({ mint: "TokenE", symbol: "E" }, 1.0, config);
+  assert("multi: can open after closing one", posE !== null && openPositions().length === 3);
 
   fs.writeFileSync(testFile, "[]");
 
