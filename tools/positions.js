@@ -176,6 +176,19 @@ function closeRemaining(position, reason, currentPrice, config) {
   }
 }
 
+function savePosition(position) {
+  const all = _loadAll();
+  const idx = all.findIndex(
+    (p) => p.mint === position.mint && p.entryTime === position.entryTime
+  );
+  if (idx !== -1) {
+    all[idx] = position;
+  } else {
+    all.push(position);
+  }
+  _saveAll(all);
+}
+
 // ---- self-test ----
 if (require.main === module && process.argv.includes("--test")) {
   const config = {
@@ -290,4 +303,5 @@ module.exports = {
   evaluateExit,
   partialClose,
   closeRemaining,
+  savePosition,
 };

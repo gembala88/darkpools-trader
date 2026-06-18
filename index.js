@@ -52,6 +52,8 @@ async function runLoop() {
   let currentPosition = openPositions[0] || null;
   let lastTelegramPoll = 0;
   let lastDailyCheckKey = null;
+  let lastLoggedPrice = null;
+  let lastLoggedPeak = null;
 
   process.on("SIGINT", () => {
     console.log("\nSIGINT received — state saved, exiting cleanly");
@@ -87,29 +89,25 @@ async function runLoop() {
 
     // monitor if position open (ALWAYS allowed, regardless of gate/kill switch)
     if (currentPosition) {
-      const allOpen = positions.loadOpenPositions();
-      currentPosition = allOpen.find(
-        (p) =>
-          p.mint === currentPosition.mint &&
-          p.entryTime === currentPosition.entryTime
-      );
-
-      if (!currentPosition || currentPosition.status === "closed") {
+      if (currentPosition.status === "closed") {
         currentPosition = null;
         console.log("Position closed, ready for next entry");
       } else {
         let currentPrice = await jupiter.getUsdPrice(currentPosition.mint);
 
         if (currentPrice != null) {
+          // evaluateExit raises peakPrice in-place
           const reason = positions.evaluateExit(
             currentPosition,
             currentPrice,
             null,
             cfg
           );
+          // persist the raised peakPrice immediately so trailing works across ticks
+          positions.savePosition(currentPosition);
+
           if (reason) {
             if (reason.type === "partialTP") {
-              const pnlBefore = currentPosition.realizedPnlSol;
               positions.partialClose(
                 currentPosition,
                 cfg.execution.partialTpSellPct,
@@ -122,12 +120,11 @@ async function runLoop() {
               riskManager.recordTradeClosed(riskState, exitPnl, false, cfg);
               telegram.notifyExit(currentPosition, currentPosition.exits[currentPosition.exits.length - 1], false);
 
-              const allOpen2 = positions.loadOpenPositions();
-              currentPosition = allOpen2.find(
-                (p) =>
-                  p.mint === currentPosition.mint &&
-                  p.entryTime === currentPosition.entryTime
-              );
+              // check if partialClose fully closed the position
+              if (currentPosition.status === "closed") {
+                currentPosition = null;
+                console.log("Position fully closed");
+              }
             } else {
               const posTotalPnl = currentPosition.realizedPnlSol;
               positions.closeRemaining(
@@ -145,9 +142,16 @@ async function runLoop() {
               console.log("Position fully closed");
             }
           } else {
-            console.log(
-              `monitor ${currentPosition.symbol}: $${currentPrice.toFixed(8)} peak $${currentPosition.peakPrice.toFixed(8)}`
-            );
+            // only log when price or peak actually changed
+            const pStr = currentPrice.toFixed(8);
+            const pkStr = currentPosition.peakPrice.toFixed(8);
+            if (pStr !== lastLoggedPrice || pkStr !== lastLoggedPeak) {
+              console.log(
+                `monitor ${currentPosition.symbol}: $${pStr} peak $${pkStr}`
+              );
+              lastLoggedPrice = pStr;
+              lastLoggedPeak = pkStr;
+            }
           }
         } else {
           console.log("monitor: no price for " + currentPosition.symbol + " — will retry");
