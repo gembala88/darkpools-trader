@@ -4,6 +4,7 @@ const { scan } = require("./tools/screening");
 const positions = require("./tools/positions");
 const riskManager = require("./tools/riskManager");
 const telegram = require("./tools/telegram");
+const jupiter = require("./tools/signals/jupiter");
 
 let cfg = loadConfig();
 
@@ -97,26 +98,7 @@ async function runLoop() {
         currentPosition = null;
         console.log("Position closed, ready for next entry");
       } else {
-        let currentPrice = null;
-        try {
-          const axios = require("axios");
-          const res = await axios.get(
-            "https://api.jup.ag/price/v3",
-            {
-              params: { ids: currentPosition.mint },
-              headers: process.env.JUPITER_API_KEY
-                ? { "x-api-key": process.env.JUPITER_API_KEY }
-                : {},
-              timeout: 10000,
-            }
-          );
-          const data = res.data?.data?.[currentPosition.mint];
-          if (data && data.price) {
-            currentPrice = parseFloat(data.price);
-          }
-        } catch (err) {
-          // silent
-        }
+        let currentPrice = await jupiter.getUsdPrice(currentPosition.mint);
 
         if (currentPrice != null) {
           const reason = positions.evaluateExit(
@@ -167,6 +149,8 @@ async function runLoop() {
               `monitor ${currentPosition.symbol}: $${currentPrice.toFixed(8)} peak $${currentPosition.peakPrice.toFixed(8)}`
             );
           }
+        } else {
+          console.log("monitor: no price for " + currentPosition.symbol + " — will retry");
         }
       }
     }
@@ -209,26 +193,7 @@ async function runLoop() {
         }
 
         if (pickMint && pickCandidate) {
-          let currentPrice = null;
-          try {
-            const axios = require("axios");
-            const res = await axios.get(
-              "https://api.jup.ag/price/v3",
-              {
-                params: { ids: pickMint },
-                headers: process.env.JUPITER_API_KEY
-                  ? { "x-api-key": process.env.JUPITER_API_KEY }
-                  : {},
-                timeout: 10000,
-              }
-            );
-            const data = res.data?.data?.[pickMint];
-            if (data && data.price) {
-              currentPrice = parseFloat(data.price);
-            }
-          } catch (err) {
-            // silent
-          }
+          const currentPrice = await jupiter.getUsdPrice(pickMint);
 
           if (currentPrice != null) {
             const candidateData = result.ranked
@@ -246,6 +211,8 @@ async function runLoop() {
               riskManager.recordTradeOpened(riskState);
               telegram.notifyEntry(currentPosition);
             }
+          } else {
+            console.log("entry skipped: no price for " + (pickCandidate.symbol || pickMint));
           }
         } else {
           console.log("No eligible candidate for entry this cycle");
