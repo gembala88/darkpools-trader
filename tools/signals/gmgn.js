@@ -43,7 +43,7 @@ async function _lookupToken(mint, config) {
           return;
         }
 
-        const stat = parsed?.data?.stat;
+        const stat = parsed?.stat || parsed?.data?.stat;
         if (!stat) {
           resolve({ available: false, reason: "no stat object in response" });
           return;

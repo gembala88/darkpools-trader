@@ -70,7 +70,7 @@
       "kind": "discovery"
     },
     "gmgn": {
-      "enabled": false,
+      "enabled": true,
       "kind": "discovery",
       "gmgnTimeoutMs": 8000,
       "gmgnCacheMs": 120000
