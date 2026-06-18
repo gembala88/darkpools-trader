@@ -71,7 +71,9 @@
     },
     "gmgn": {
       "enabled": false,
-      "kind": "discovery"
+      "kind": "discovery",
+      "gmgnTimeoutMs": 8000,
+      "gmgnCacheMs": 120000
     },
     "signalServer": {
       "enabled": false,

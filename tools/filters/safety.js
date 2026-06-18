@@ -1,5 +1,6 @@
 const holders = require("../signals/holders");
 const scam = require("./scam");
+const gmgn = require("../signals/gmgn");
 
 async function applySafetyFilter(candidate, config) {
   if (!candidate) {
@@ -235,37 +236,44 @@ async function applySafetyFilter(candidate, config) {
     }
   }
 
-  // maxBotPct — always skip unless gmgn is enabled and provides data
+  // GMGN-based checks: maxBotPct, maxBundlePct, maxInsiderConcentrationPct
+  const gmgnCfg = config.sources?.gmgn;
+  const gmgnEnabled = gmgnCfg && gmgnCfg.enabled === true;
+  let gmgnStats = null;
+
+  if (candidate && gmgnEnabled && (f.maxBotPct != null || f.maxBundlePct != null || f.maxInsiderConcentrationPct != null)) {
+    if (process.env.GMGN_API_KEY) {
+      try {
+        gmgnStats = await gmgn.getTokenStats(candidate.mint, config);
+      } catch (err) {
+        gmgnStats = { available: false, reason: `error: ${err.message}` };
+      }
+    } else {
+      gmgnStats = { available: false, reason: "GMGN_API_KEY not set" };
+    }
+  }
+
+  const _gmgnCheck = (name, pctValue, threshold) => {
+    if (!gmgnStats || !gmgnStats.available) {
+      const reason = gmgnStats ? gmgnStats.reason : (!gmgnEnabled ? "gmgn disabled" : "gmgn data unavailable");
+      checks.push({ name, value: null, threshold, result: "skip", reason });
+      return;
+    }
+    if (pctValue > threshold) {
+      checks.push({ name, value: pctValue, threshold, result: "fail", reason: `rate ${pctValue}% > ${threshold}%` });
+    } else {
+      checks.push({ name, value: pctValue, threshold, result: "pass", reason: null });
+    }
+  };
+
   if (f.maxBotPct != null) {
-    checks.push({
-      name: "maxBotPct",
-      value: null,
-      threshold: f.maxBotPct,
-      result: "skip",
-      reason: "no data source until GMGN enabled",
-    });
+    _gmgnCheck("maxBotPct", gmgnStats?.botPct, f.maxBotPct);
   }
-
-  // maxBundlePct — always skip unless gmgn is enabled
   if (f.maxBundlePct != null) {
-    checks.push({
-      name: "maxBundlePct",
-      value: null,
-      threshold: f.maxBundlePct,
-      result: "skip",
-      reason: "no data source until GMGN enabled",
-    });
+    _gmgnCheck("maxBundlePct", gmgnStats?.bundlePct, f.maxBundlePct);
   }
-
-  // maxInsiderConcentrationPct — always skip unless gmgn is enabled
   if (f.maxInsiderConcentrationPct != null) {
-    checks.push({
-      name: "maxInsiderConcentrationPct",
-      value: null,
-      threshold: f.maxInsiderConcentrationPct,
-      result: "skip",
-      reason: "no data source until GMGN enabled",
-    });
+    _gmgnCheck("maxInsiderConcentrationPct", gmgnStats?.insiderPct, f.maxInsiderConcentrationPct);
   }
 
   const passed = !checks.some((c) => c.result === "fail");
