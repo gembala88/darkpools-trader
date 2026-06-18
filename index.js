@@ -5,6 +5,7 @@ const positions = require("./tools/positions");
 const riskManager = require("./tools/riskManager");
 const telegram = require("./tools/telegram");
 const jupiter = require("./tools/signals/jupiter");
+const { assessRegime } = require("./tools/filters/regime");
 
 let cfg = loadConfig();
 
@@ -178,6 +179,15 @@ async function runLoop() {
 
       try {
         const result = await scan(cfg);
+
+        // market regime filter — blocks ENTRY only, never exits
+        const regime = await assessRegime(result.ranked, cfg);
+        result.regime = regime; // include in scan-log
+        if (regime.regime === "risk_off") {
+          console.log(`ENTRY HELD: market risk_off (${regime.reason})`);
+          continue;
+        }
+
         const decision = result.decision;
 
         let pickMint = null;

@@ -52,6 +52,7 @@ const modules = [
   { path: "tools/signals/holders.js", exports: ["getTopHolderPct", "clearCache"] },
   { path: "tools/signals/candles.js", exports: ["getCandles", "clearCache"] },
   { path: "tools/filters/safety.js", exports: ["applySafetyFilter"] },
+  { path: "tools/filters/regime.js", exports: ["assessRegime"] },
   { path: "strategies/index.js", exports: ["registry", "getActiveStrategy"] },
   { path: "strategies/trendFollowing.js", exports: ["evaluate"] },
 ];

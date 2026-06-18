@@ -115,6 +115,13 @@
     "minConfidence": 0
   },
   "debugRawLogging": true,
+  "marketRegime": {
+    "enabled": true,
+    "solDropPct": 8,
+    "breadthDownPct": 70,
+    "minBreadthSample": 5,
+    "solMint": "So11111111111111111111111111111111111111112"
+  },
   "confirmation": {
     "feeConfirmNudge": 1.05
   },
