@@ -19,7 +19,7 @@ async function assessRegime(candidates, config) {
       const solStats = await gmgn.getTokenStats(solMint, config);
       if (solStats.available && solStats.feeConfirm) {
         const price = solStats.feeConfirm.price;
-        const price24h = solStats.feeConfirm.price_1h;
+        const price24h = solStats.feeConfirm.price_24h;
         if (price != null && price24h != null && price24h !== 0) {
           solChangePct = parseFloat(((price - price24h) / price24h * 100).toFixed(2));
         } else {
@@ -186,6 +186,42 @@ if (require.main === module && process.argv.includes("--test")) {
     };
     const r8 = await assessRegime([], tightCfg);
     assert("tight config+no data: unknown", r8.regime === "unknown");
+
+    // ---- SOL-path mock tests ----
+    const origGetTokenStats = gmgn.getTokenStats;
+    const solMint = cfg.marketRegime.solMint;
+
+    try {
+      // 9. Mock SOL -10% (90 vs 100) -> risk_off
+      gmgn.getTokenStats = async (mint) => {
+        if (mint === solMint) return { available: true, feeConfirm: { price: 90, price_24h: 100, price_1h: 95 } };
+        return { available: false, reason: "mock unavailable" };
+      };
+      const r9 = await assessRegime([], cfg);
+      assert("SOL -10% via price_24h: risk_off", r9.regime === "risk_off" && r9.solChangePct === -10);
+
+      // 10. Mock SOL -3% (< 8% threshold) -> not risk_off
+      gmgn.getTokenStats = async (mint) => {
+        if (mint === solMint) return { available: true, feeConfirm: { price: 97, price_24h: 100, price_1h: 98 } };
+        return { available: false, reason: "mock unavailable" };
+      };
+      const r10 = await assessRegime([], cfg);
+      assert("SOL -3% via price_24h: not risk_off", r10.regime !== "risk_off" && r10.solChangePct === -3);
+
+      // 11. Mock SOL -10% still triggers even with weak breadth (to prove AND path works)
+      gmgn.getTokenStats = async (mint) => {
+        if (mint === solMint) return { available: true, feeConfirm: { price: 90, price_24h: 100, price_1h: 95 } };
+        return { available: false, reason: "mock unavailable" };
+      };
+      const candidatesUp2 = [
+        { mint: "A", candidate: { mint: "A" }, feeConfirm: { price: 1.1, price_1h: 1.0 } },
+        { mint: "B", candidate: { mint: "B" }, feeConfirm: { price: 1.05, price_1h: 1.0 } },
+      ];
+      const r11 = await assessRegime(candidatesUp2, cfg);
+      assert("SOL -10% overrides weak breadth: risk_off", r11.regime === "risk_off");
+    } finally {
+      gmgn.getTokenStats = origGetTokenStats;
+    }
 
     console.log(`\n${failures === 0 ? "ALL PASS" : `${failures} FAILURE(S)`}`);
     process.exit(failures > 0 ? 1 : 0);

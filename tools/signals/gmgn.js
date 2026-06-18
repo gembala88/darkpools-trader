@@ -68,7 +68,8 @@ async function _lookupToken(mint, config) {
           const price1h = Number(priceBlock.price_1h);
           const buyVol24h = Number(priceBlock.buy_volume_24h);
           const sellVol24h = Number(priceBlock.sell_volume_24h);
-          if (!isNaN(price) && !isNaN(price1h) && !isNaN(buyVol24h) && !isNaN(sellVol24h)) {
+          const price24h = Number(priceBlock.price_24h);
+          if (!isNaN(price) && !isNaN(price1h) && !isNaN(price24h) && !isNaN(buyVol24h) && !isNaN(sellVol24h)) {
             const priceUp = price > price1h;
             const buyPressure = buyVol24h > sellVol24h;
             feeConfirm = {
@@ -77,14 +78,15 @@ async function _lookupToken(mint, config) {
               buyPressure,
               price,
               price1h,
+              price24h,
               buyVol24h,
               sellVol24h,
             };
           } else {
-            feeConfirm = { signal: "unknown", priceUp: null, buyPressure: null, price: null, price1h: null, buyVol24h: null, sellVol24h: null };
+            feeConfirm = { signal: "unknown", priceUp: null, buyPressure: null, price: null, price1h: null, price24h: null, buyVol24h: null, sellVol24h: null };
           }
         } else {
-          feeConfirm = { signal: "unknown", priceUp: null, buyPressure: null, price: null, price1h: null, buyVol24h: null, sellVol24h: null };
+          feeConfirm = { signal: "unknown", priceUp: null, buyPressure: null, price: null, price1h: null, price24h: null, buyVol24h: null, sellVol24h: null };
         }
 
         resolve({
