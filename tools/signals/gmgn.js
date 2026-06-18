@@ -1,6 +1,10 @@
-const { execFile } = require("child_process");
+const { exec } = require("child_process");
 
 const _cache = {};
+
+function _isValidMint(mint) {
+  return typeof mint === "string" && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(mint);
+}
 
 async function _lookupToken(mint, config) {
   const gmgnCfg = config.sources?.gmgn || {};
@@ -11,13 +15,17 @@ async function _lookupToken(mint, config) {
     return { available: false, reason: "GMGN_API_KEY not set" };
   }
 
+  if (!_isValidMint(mint)) {
+    return { available: false, reason: "invalid mint" };
+  }
+
   return new Promise((resolve) => {
-    const cliName = process.platform === "win32" ? "gmgn-cli.cmd" : "gmgn-cli";
-    const child = execFile(
-      cliName,
-      ["token", "info", "--chain", "sol", "--address", mint, "--raw"],
+    const cmd = `gmgn-cli token info --chain sol --address ${mint} --raw`;
+    exec(
+      cmd,
       {
         timeout: timeoutMs,
+        maxBuffer: 10 * 1024 * 1024,
         env: { ...process.env, GMGN_API_KEY: apiKey },
         windowsHide: true,
       },
