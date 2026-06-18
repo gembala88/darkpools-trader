@@ -2,10 +2,16 @@ const fs = require("fs");
 const path = require("path");
 
 const DRY_RUN_FILE = path.resolve(__dirname, "..", "data", "dry-run-positions.json");
+let _testFile = null;
+
+function _dataFile() {
+  return _testFile || DRY_RUN_FILE;
+}
 
 function _loadAll() {
+  const file = _dataFile();
   try {
-    const raw = fs.readFileSync(DRY_RUN_FILE, "utf-8");
+    const raw = fs.readFileSync(file, "utf-8");
     const data = JSON.parse(raw);
     return Array.isArray(data) ? data : [];
   } catch {
@@ -14,11 +20,12 @@ function _loadAll() {
 }
 
 function _saveAll(positions) {
-  const dir = path.dirname(DRY_RUN_FILE);
+  const file = _dataFile();
+  const dir = path.dirname(file);
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
-  fs.writeFileSync(DRY_RUN_FILE, JSON.stringify(positions, null, 2));
+  fs.writeFileSync(file, JSON.stringify(positions, null, 2));
 }
 
 function loadOpenPositions() {
@@ -191,6 +198,11 @@ function savePosition(position) {
 
 // ---- self-test ----
 if (require.main === module && process.argv.includes("--test")) {
+  const testFile = path.resolve(__dirname, "..", "data", ".sim-test-positions.json");
+  _testFile = testFile;
+  fs.writeFileSync(testFile, "[]");
+  const clean = () => { try { fs.unlinkSync(testFile); } catch {} };
+
   const config = {
     mode: "dry_run",
     positionSizeSol: 1,
@@ -233,7 +245,7 @@ if (require.main === module && process.argv.includes("--test")) {
   assert("SL exit: realizedPnlSol negative", pos.realizedPnlSol < 0);
 
   // Reset for next test
-  fs.writeFileSync(DRY_RUN_FILE, "[]");
+  fs.writeFileSync(testFile, "[]");
 
   // 3. Partial-TP + trailing path
   const pos2 = openPosition(dummyCandidate, 1.0, config);
@@ -258,7 +270,7 @@ if (require.main === module && process.argv.includes("--test")) {
   assert("trailing exit: status closed", pos2.status === "closed");
   assert("trailing exit: total PnL positive (moon captured)", pos2.realizedPnlSol > 0);
 
-  fs.writeFileSync(DRY_RUN_FILE, "[]");
+  fs.writeFileSync(testFile, "[]");
 
   // 4. Pure trailing (moonshot) path
   const pos3 = openPosition(dummyCandidate, 1.0, config);
@@ -271,7 +283,7 @@ if (require.main === module && process.argv.includes("--test")) {
   assert("moonshot: status closed", pos3.status === "closed");
   assert("moonshot: PnL strongly positive", pos3.realizedPnlSol > 0.2);
 
-  fs.writeFileSync(DRY_RUN_FILE, "[]");
+  fs.writeFileSync(testFile, "[]");
 
   // 5. Max-hold path
   const pos4 = openPosition(dummyCandidate, 1.0, config);
@@ -281,7 +293,7 @@ if (require.main === module && process.argv.includes("--test")) {
   closeRemaining(pos4, holdReason, 1.01, config);
   assert("maxHold: status closed", pos4.status === "closed");
 
-  fs.writeFileSync(DRY_RUN_FILE, "[]");
+  fs.writeFileSync(testFile, "[]");
 
   // 6. Exit slippage
   const pos5 = openPosition(dummyCandidate, 1.0, config);
@@ -291,8 +303,9 @@ if (require.main === module && process.argv.includes("--test")) {
   const expectedExitEff = 0.90 * (1 - slip / 100);
   assert("exit price effective < quoted by slippage", Math.abs(exitEff - expectedExitEff) < 0.000001);
 
-  fs.writeFileSync(DRY_RUN_FILE, "[]");
+  fs.writeFileSync(testFile, "[]");
 
+  clean();
   console.log(`\n${failures === 0 ? "ALL PASS" : `${failures} FAILURE(S)`}`);
   process.exit(failures > 0 ? 1 : 0);
 }
