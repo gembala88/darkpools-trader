@@ -60,11 +60,39 @@ async function _lookupToken(mint, config) {
           return;
         }
 
+        // fee/activity confirmation from price block
+        const priceBlock = parsed?.price || parsed?.data?.price;
+        let feeConfirm;
+        if (priceBlock) {
+          const price = Number(priceBlock.price);
+          const price1h = Number(priceBlock.price_1h);
+          const buyVol24h = Number(priceBlock.buy_volume_24h);
+          const sellVol24h = Number(priceBlock.sell_volume_24h);
+          if (!isNaN(price) && !isNaN(price1h) && !isNaN(buyVol24h) && !isNaN(sellVol24h)) {
+            const priceUp = price > price1h;
+            const buyPressure = buyVol24h > sellVol24h;
+            feeConfirm = {
+              signal: priceUp && buyPressure ? "confirmed" : "neutral",
+              priceUp,
+              buyPressure,
+              price,
+              price1h,
+              buyVol24h,
+              sellVol24h,
+            };
+          } else {
+            feeConfirm = { signal: "unknown", priceUp: null, buyPressure: null, price: null, price1h: null, buyVol24h: null, sellVol24h: null };
+          }
+        } else {
+          feeConfirm = { signal: "unknown", priceUp: null, buyPressure: null, price: null, price1h: null, buyVol24h: null, sellVol24h: null };
+        }
+
         resolve({
           available: true,
           botPct: parseFloat((botRate * 100).toFixed(2)),
           bundlePct: parseFloat((bundleRate * 100).toFixed(2)),
           insiderPct: parseFloat((Math.max(ratRate, entrapRate) * 100).toFixed(2)),
+          feeConfirm,
           raw: {
             bot_degen_rate: botRate,
             top_bundler_trader_percentage: bundleRate,
@@ -183,6 +211,49 @@ if (require.main === module && process.argv.includes("--test")) {
     const botS = _testCheck("maxBotPct", null, 30);
     // When available=false, value=null -> skip
     assert("unavailable: skip", botS.result === "skip");
+
+    // ---- feeConfirm self-tests (replicate _lookupToken logic) ----
+    function _computeFeeConfirm(priceBlock) {
+      if (!priceBlock) return { signal: "unknown", priceUp: null, buyPressure: null };
+      const price = Number(priceBlock.price);
+      const price1h = Number(priceBlock.price_1h);
+      const buyVol24h = Number(priceBlock.buy_volume_24h);
+      const sellVol24h = Number(priceBlock.sell_volume_24h);
+      if (isNaN(price) || isNaN(price1h) || isNaN(buyVol24h) || isNaN(sellVol24h)) {
+        return { signal: "unknown", priceUp: null, buyPressure: null };
+      }
+      const priceUp = price > price1h;
+      const buyPressure = buyVol24h > sellVol24h;
+      return {
+        signal: priceUp && buyPressure ? "confirmed" : "neutral",
+        priceUp,
+        buyPressure,
+        price,
+        price1h,
+        buyVol24h,
+        sellVol24h,
+      };
+    }
+
+    // 7. confirmed: price up + buy pressure
+    const c1 = _computeFeeConfirm({ price: 2.0, price_1h: 1.5, buy_volume_24h: 1000, sell_volume_24h: 500 });
+    assert("feeConfirm: confirmed", c1.signal === "confirmed" && c1.priceUp === true && c1.buyPressure === true);
+
+    // 8. neutral: price up but no buy pressure
+    const c2 = _computeFeeConfirm({ price: 2.0, price_1h: 1.5, buy_volume_24h: 500, sell_volume_24h: 1000 });
+    assert("feeConfirm: neutral (sell pressure)", c2.signal === "neutral" && c2.priceUp === true && c2.buyPressure === false);
+
+    // 9. neutral: price down
+    const c3 = _computeFeeConfirm({ price: 1.0, price_1h: 1.5, buy_volume_24h: 1000, sell_volume_24h: 500 });
+    assert("feeConfirm: neutral (price down)", c3.signal === "neutral" && c3.priceUp === false && c3.buyPressure === true);
+
+    // 10. unknown: missing price block
+    const c4 = _computeFeeConfirm(null);
+    assert("feeConfirm: unknown (no price)", c4.signal === "unknown");
+
+    // 11. unknown: NaN fields
+    const c5 = _computeFeeConfirm({ price: "abc", price_1h: 1.5, buy_volume_24h: 1000, sell_volume_24h: 500 });
+    assert("feeConfirm: unknown (NaN price)", c5.signal === "unknown");
 
     console.log(`\n${failures === 0 ? "ALL PASS" : `${failures} FAILURE(S)`}`);
     process.exit(failures > 0 ? 1 : 0);

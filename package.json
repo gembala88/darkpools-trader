@@ -22,7 +22,8 @@
     "report:test": "node tools/reporter.js --test",
     "healthcheck": "node scripts/healthcheck.js",
     "scam:test": "node tools/filters/scam.js --test",
-    "gmgn:test": "node tools/signals/gmgn.js --test"
+    "gmgn:test": "node tools/signals/gmgn.js --test",
+    "feeconfirm:test": "node tools/signals/gmgn.js --test"
   },
   "dependencies": {
     "dotenv": "^16.4.7",

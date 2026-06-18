@@ -12,6 +12,8 @@ function buildSystemPrompt() {
     '  "reason": <short string>,',
     '  "rejected": [ { "mint": <string>, "why": <short> } ]',
     '}',
+    'Note: feeConfirm=confirmed means price rose with positive buy pressure (healthy momentum);',
+    'neutral/unknown means no confirmation — treat as mild positive only, never decisive.',
   ].join("\n");
 }
 
@@ -33,9 +35,10 @@ function buildUserPrompt(candidates) {
       ` emaFast=${ind.emaFast != null ? ind.emaFast : "?"}` +
       ` emaSlow=${ind.emaSlow != null ? ind.emaSlow : "?"}` +
       ` rsi=${ind.rsi != null ? ind.rsi : "?"}` +
-      ` liquidityUsd=${c.candidate?.liquidityUsd != null ? c.candidate.liquidityUsd : "?"}` +
-      ` volume24hUsd=${c.candidate?.volume24hUsd != null ? c.candidate.volume24hUsd : "?"}` +
-      ` ageHours=${c.candidate?.ageHours != null ? c.candidate.ageHours.toFixed(1) : "?"}` +
+       ` liquidityUsd=${c.candidate?.liquidityUsd != null ? c.candidate.liquidityUsd : "?"}` +
+       ` volume24hUsd=${c.candidate?.volume24hUsd != null ? c.candidate.volume24hUsd : "?"}` +
+       ` ageHours=${c.candidate?.ageHours != null ? c.candidate.ageHours.toFixed(1) : "?"}` +
+       ` feeConfirm=${c.feeConfirm?.signal || "unknown"}` +
       (skipped ? ` skipped_checks=${skipped}` : "")
     );
   }

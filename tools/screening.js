@@ -5,6 +5,7 @@ const candles = require("./signals/candles");
 const strategy = require("../strategies/index");
 const safety = require("./filters/safety");
 const agent = require("../agent");
+const gmgn = require("./signals/gmgn");
 
 async function scan(config) {
   const candidates = await signals.getCandidates(config);
@@ -61,7 +62,7 @@ async function scan(config) {
   const medianVol = median(volValues) || 1;
   const minAge = config.filters?.minTokenAgeHours || 1;
 
-  const withScores = withTiming.map((item) => {
+  const withScores = await Promise.all(withTiming.map(async (item) => {
     const c = item.candidate;
     const w = config.scoring;
 
@@ -75,10 +76,25 @@ async function scan(config) {
       ? Math.min(c.ageHours / (minAge * 4), 1)
       : 0;
 
-    const score =
+    let score =
       (w.wLiquidity || 0) * liqScore +
       (w.wVolume || 0) * volScore +
       (w.wAge || 0) * ageScore;
+
+    // fee/activity confirmation (reuses gmgn cache, no extra cli call)
+    let feeConfirm = { signal: "unknown", priceUp: null, buyPressure: null };
+    try {
+      const stats = await gmgn.getTokenStats(c.mint, config);
+      if (stats.available && stats.feeConfirm) {
+        feeConfirm = stats.feeConfirm;
+        const nudge = config.confirmation?.feeConfirmNudge || 1.05;
+        if (feeConfirm.signal === "confirmed") {
+          score = score * nudge;
+        }
+      }
+    } catch {
+      // feeConfirm stays unknown, score unchanged
+    }
 
     return {
       mint: c.mint,
@@ -87,8 +103,9 @@ async function scan(config) {
       score: parseFloat(score.toFixed(4)),
       checks: item.checks,
       timing: item.timing,
+      feeConfirm,
     };
-  });
+  }));
 
   withScores.sort((a, b) => b.score - a.score);
   const topN = config.scoring.topN || 10;

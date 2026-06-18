@@ -115,6 +115,9 @@
     "minConfidence": 0
   },
   "debugRawLogging": true,
+  "confirmation": {
+    "feeConfirmNudge": 1.05
+  },
   "scoring": {
     "wLiquidity": 0.4,
     "wVolume": 0.4,
