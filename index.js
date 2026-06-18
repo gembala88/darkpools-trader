@@ -47,6 +47,7 @@ async function runLoop() {
   console.log("darkpools-trader | mode:", cfg.mode, "| starting dry_run loop");
 
   let openPositions = positions.loadOpenPositions();
+  let loopScanMs = cfg.execution?.loopScanMs || 60000;
 
   let lastTelegramPoll = 0;
   let lastDailyCheckKey = null;
@@ -78,6 +79,7 @@ async function runLoop() {
       console.log(`config reload failed: ${err.message} — keeping previous config`);
       telegram.notifyError(`config reload failed: ${err.message}`);
     }
+    loopScanMs = cfg.execution?.loopScanMs || 60000;
 
     // Telegram command polling every 3s
     if (now - lastTelegramPoll > 3000) {
