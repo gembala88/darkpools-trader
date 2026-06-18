@@ -165,6 +165,17 @@ function loadConfig() {
     throw new Error("decision.eligibleTimings must be a non-empty array in user-config.json.");
   }
 
+  // scam / blacklist
+  if (cfg.blacklistMints != null && !Array.isArray(cfg.blacklistMints)) {
+    throw new Error("blacklistMints must be an array in user-config.json.");
+  }
+  const scamFlags = ["requireMintAuthorityRevoked", "requireFreezeAuthorityRevoked"];
+  for (const key of scamFlags) {
+    if (cfg.filters?.[key] != null && typeof cfg.filters[key] !== "boolean") {
+      throw new Error(`filters.${key} must be boolean in user-config.json (got ${JSON.stringify(cfg.filters[key])}).`);
+    }
+  }
+
   // strategy block
   const strategy = cfg.strategy;
   if (!strategy || !strategy.active) {

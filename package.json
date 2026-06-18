@@ -20,7 +20,8 @@
     "telegram:test": "node tools/telegram.js --test",
     "report": "node index.js report",
     "report:test": "node tools/reporter.js --test",
-    "healthcheck": "node scripts/healthcheck.js"
+    "healthcheck": "node scripts/healthcheck.js",
+    "scam:test": "node tools/filters/scam.js --test"
   },
   "dependencies": {
     "dotenv": "^16.4.7",

@@ -164,6 +164,9 @@
     "maxTopHolderPct": 25,
     "maxBotPct": 30,
     "maxBundlePct": 20,
-    "maxInsiderConcentrationPct": 25
-  }
+    "maxInsiderConcentrationPct": 25,
+    "requireMintAuthorityRevoked": true,
+    "requireFreezeAuthorityRevoked": true
+  },
+  "blacklistMints": []
 }

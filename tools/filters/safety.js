@@ -1,8 +1,122 @@
 const holders = require("../signals/holders");
+const scam = require("./scam");
 
 async function applySafetyFilter(candidate, config) {
+  if (!candidate) {
+    return { passed: false, checks: [{ name: "invalidCandidate", value: null, threshold: null, result: "fail", reason: "candidate is null/undefined" }] };
+  }
   const f = config.filters;
   const checks = [];
+
+  // blacklist — cheapest, no RPC needed
+  try {
+    const blacklist = config.blacklistMints || [];
+    if (candidate && blacklist.includes(candidate.mint)) {
+      checks.push({
+        name: "blacklist",
+        value: candidate.mint,
+        threshold: null,
+        result: "fail",
+        reason: "blacklisted mint",
+      });
+    } else {
+      checks.push({
+        name: "blacklist",
+        value: candidate ? candidate.mint : null,
+        threshold: null,
+        result: "pass",
+        reason: null,
+      });
+    }
+  } catch (err) {
+    checks.push({
+      name: "blacklist",
+      value: null,
+      threshold: null,
+      result: "fail",
+      reason: `error: ${err.message}`,
+    });
+  }
+
+  // mintAuthority (on-chain)
+  if (candidate && f.requireMintAuthorityRevoked) {
+    try {
+      const auth = await scam.getTokenAuthorities(candidate.mint);
+      if (auth.mintAuthorityActive === true) {
+        checks.push({
+          name: "mintAuthority",
+          value: "active",
+          threshold: "revoked",
+          result: "fail",
+          reason: "mint authority still active (can mint infinite tokens)",
+        });
+      } else if (auth.mintAuthorityActive === false) {
+        checks.push({
+          name: "mintAuthority",
+          value: "revoked",
+          threshold: "revoked",
+          result: "pass",
+          reason: null,
+        });
+      } else {
+        checks.push({
+          name: "mintAuthority",
+          value: null,
+          threshold: "revoked",
+          result: "skip",
+          reason: "authority data unavailable (no RPC)",
+        });
+      }
+    } catch (err) {
+      checks.push({
+        name: "mintAuthority",
+        value: null,
+        threshold: "revoked",
+        result: "fail",
+        reason: `error: ${err.message}`,
+      });
+    }
+  }
+
+  // freezeAuthority (on-chain)
+  if (candidate && f.requireFreezeAuthorityRevoked) {
+    try {
+      const auth = await scam.getTokenAuthorities(candidate.mint);
+      if (auth.freezeAuthorityActive === true) {
+        checks.push({
+          name: "freezeAuthority",
+          value: "active",
+          threshold: "revoked",
+          result: "fail",
+          reason: "freeze authority active (can freeze wallets)",
+        });
+      } else if (auth.freezeAuthorityActive === false) {
+        checks.push({
+          name: "freezeAuthority",
+          value: "revoked",
+          threshold: "revoked",
+          result: "pass",
+          reason: null,
+        });
+      } else {
+        checks.push({
+          name: "freezeAuthority",
+          value: null,
+          threshold: "revoked",
+          result: "skip",
+          reason: "authority data unavailable (no RPC)",
+        });
+      }
+    } catch (err) {
+      checks.push({
+        name: "freezeAuthority",
+        value: null,
+        threshold: "revoked",
+        result: "fail",
+        reason: `error: ${err.message}`,
+      });
+    }
+  }
 
   // minLiquidityUsd
   if (f.minLiquidityUsd != null) {
