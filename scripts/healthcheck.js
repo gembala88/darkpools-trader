@@ -123,13 +123,16 @@ try {
   }
 }
 
-// 4c. gmgn & signalServer enabled===false by default
+// 4c. signalServer (Charon) must stay disabled; gmgn may be on as read-only data
 try {
   const cfg = require(path.join(ROOT, "config")).loadConfig();
-  if (cfg.sources?.gmgn?.enabled === false && cfg.sources?.signalServer?.enabled === false) {
-    pass("gmgn & signalServer default to false");
+  if (cfg.sources?.signalServer?.enabled === true) {
+    fail("signalServer (Charon) must stay disabled", `signalServer.enabled=${cfg.sources.signalServer.enabled}`);
   } else {
-    fail("gmgn or signalServer not default-false", `gmgn=${cfg.sources?.gmgn?.enabled} signalServer=${cfg.sources?.signalServer?.enabled}`);
+    pass("signalServer (Charon) disabled");
+  }
+  if (cfg.sources?.gmgn?.enabled === true) {
+    console.log("       gmgn enabled (read-only data source)");
   }
 } catch (err) {
   fail("Could not verify source defaults", err.message);
