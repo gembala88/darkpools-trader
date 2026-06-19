@@ -1,5 +1,9 @@
 const axios = require("axios");
 const riskManager = require("./riskManager");
+const config = require("../config");
+const positions = require("./positions");
+const reporter = require("./reporter");
+const jupiter = require("./signals/jupiter");
 
 let _config = null;
 let _token = null;
@@ -94,8 +98,9 @@ function _replyKeyboard() {
   return {
     keyboard: [
       [{ text: "📊 Status" }, { text: "📈 Report" }],
-      [{ text: "🔔 Notif" }, { text: "⚙️ Config" }],
-      [{ text: "⏸️ Stop" }, { text: "▶️ Resume" }],
+      [{ text: "💰 PnL" }, { text: "🔔 Notif" }],
+      [{ text: "⚙️ Config" }, { text: "⏸️ Stop" }],
+      [{ text: "▶️ Resume" }],
     ],
     resize_keyboard: true,
     is_persistent: true,
@@ -106,6 +111,7 @@ function _replyKeyboard() {
 const _buttonRoutes = {
   "📊 status": "/status",
   "📈 report": "/report",
+  "💰 pnl": "/pnl",
   "🔔 notif": "/menu",
   "⚙️ config": "/config",
   "⏸️ stop": "/stop",
@@ -156,10 +162,10 @@ async function pollCommands() {
             });
           } else if (data.startsWith("toggle:")) {
             const key = data.replace("toggle:", "");
-            const cfg = require("./config").loadConfig();
-            const current = cfg.telegram?.notify?.[key];
+            const currentCfg = config.loadConfig();
+            const current = currentCfg.telegram?.notify?.[key];
             const newVal = current === true ? "false" : "true";
-            require("./config").setConfigValue(`telegram.notify.${key}`, newVal);
+            config.setConfigValue(`telegram.notify.${key}`, newVal);
             // answer callback
             await _call("answerCallbackQuery", {
               callback_query_id: cq.id,
@@ -167,7 +173,7 @@ async function pollCommands() {
               show_alert: false,
             });
             // edit message to reflect new states
-            const updatedCfg = require("./config").loadConfig();
+            const updatedCfg = config.loadConfig();
             const keyboard = _menuKeyboard(updatedCfg);
             await _call("editMessageText", {
               chat_id: chatId,
@@ -175,6 +181,22 @@ async function pollCommands() {
               text: "<b>🔔 Notification Toggles</b>\nTap to toggle:",
               parse_mode: "HTML",
               reply_markup: { inline_keyboard: keyboard },
+            });
+          } else if (data === "refresh_pnl") {
+            const reply = await _handleCommand("/pnl");
+            if (reply) {
+              await _call("editMessageText", {
+                chat_id: chatId,
+                message_id: msgId,
+                text: reply.text,
+                parse_mode: "HTML",
+                reply_markup: { inline_keyboard: reply.keyboard },
+              });
+            }
+            await _call("answerCallbackQuery", {
+              callback_query_id: cq.id,
+              text: "Refreshed",
+              show_alert: false,
             });
           }
         } catch (err) {
@@ -257,7 +279,16 @@ async function _handleCommand(text) {
       return {
         text: [
           "<b>🤖 darkpools-trader</b>",
-          "Use the buttons below or type /help for commands.",
+          "",
+          "Use the buttons below or type a command:",
+          "📊 Status — bot state + open positions",
+          "📈 Report — closed trade summary",
+          "💰 PnL — live unrealized PnL per position",
+          "🔔 Notif — toggle notification types",
+          "⚙️ Config — view current settings",
+          "⏸️ Stop — kill switch (no new entries)",
+          "▶️ Resume — re-enable entries",
+          "/set &lt;key&gt; &lt;value&gt; — change a setting",
         ].join("\n"),
         replyKeyboard: true,
       };
@@ -274,11 +305,10 @@ async function _handleCommand(text) {
 
     case "/status": {
       const state = riskManager.loadState();
-      const cfg = require("./config").loadConfig();
-      const openPositions = require("./positions").loadOpenPositions();
-      const jupiter = require("./signals/jupiter");
+      const cfg = config.loadConfig();
+      const openPositions = positions.loadOpenPositions();
       const lines = [
-        `<b>Status</b>`,
+        `<b>📊 Status</b>`,
         `Mode: ${cfg.mode}`,
         `Kill switch: ${state.killSwitch ? "🔴 ON" : "🟢 OFF"}`,
         `Today PnL: ${state.realizedPnlTodaySol >= 0 ? "🟢" : "🔴"} ${state.realizedPnlTodaySol.toFixed(6)} SOL`,
@@ -286,7 +316,7 @@ async function _handleCommand(text) {
         `Trades today: ${state.tradesToday}`,
       ];
       if (openPositions.length > 0) {
-        lines.push(`\n<b>Open positions (${openPositions.length})</b>`);
+        lines.push(``, `<b>Open positions (${openPositions.length})</b>`);
         for (const p of openPositions) {
           const held = p.entryTime ? ((Date.now() - p.entryTime) / 3600000).toFixed(1) : "?";
           let unrealized;
@@ -298,14 +328,18 @@ async function _handleCommand(text) {
           } catch {
             unrealized = "?";
           }
-          lines.push(`${escapeHtml(p.symbol)} | entry $${(p.entryPriceEffective || 0).toFixed(8)} | ${held}h | unreal ${unrealized}%`);
+          const arrow = unrealized !== "?" && parseFloat(unrealized) >= 0 ? "🟢" : "🔴";
+          lines.push(
+            `${escapeHtml(p.symbol)} ${arrow}`,
+            `  Entry $${(p.entryPriceEffective || 0).toFixed(8)} · ${held}h · Unreal ${unrealized}%`
+          );
         }
       }
       return { text: lines.join("\n") };
     }
 
     case "/menu": {
-      const cfg = require("./config").loadConfig();
+      const cfg = config.loadConfig();
       return {
         text: "<b>🔔 Notification Toggles</b>\nTap to toggle:",
         keyboard: _menuKeyboard(cfg),
@@ -313,9 +347,8 @@ async function _handleCommand(text) {
     }
 
     case "/report": {
-      const { loadAllPositions, buildReport } = require("./reporter");
-      const positions = loadAllPositions();
-      const report = buildReport(positions);
+      const allPositions = reporter.loadAllPositions();
+      const report = reporter.buildReport(allPositions);
       if (report.totalClosed === 0) {
         return { text: "📊 0 closed trades yet" };
       }
@@ -337,21 +370,84 @@ async function _handleCommand(text) {
     }
 
     case "/config": {
-      const { getConfigView } = require("./config");
-      return { text: `<pre>${getConfigView()}</pre>` };
+      const cfg = config.loadConfig();
+      const lines = [
+        "<b>⚙️ Config</b>",
+        `Mode: ${cfg.mode}`,
+        `Position: ${cfg.positionSizeSol} SOL`,
+        `TP: ${cfg.takeProfitPct}% / SL: ${cfg.stopLossPct}%`,
+        `Trailing: ${cfg.trailingEnabled ? "ON" : "OFF"}`,
+        `Max Hold: ${cfg.maxHoldHours}h`,
+        `Max Concurrent: ${cfg.maxConcurrentPositions}`,
+        `Cooldown: ${cfg.cooldownMinutesBetweenTrades}m`,
+        `Day Loss Limit: ${cfg.dailyLossLimitPct}%`,
+        `Filters: liq≥$${(cfg.filters?.minLiquidityUsd || 0).toLocaleString()} age≥${cfg.filters?.minTokenAgeHours || "?"}h`,
+      ];
+      return { text: lines.join("\n") };
     }
 
     case "/set": {
       if (args.length < 2) return { text: "Usage: /set &lt;key&gt; &lt;value&gt;" };
       const key = args[0];
       const val = args.slice(1).join(" ");
+      const _hardLockedKeys = [
+        "mode", "confirmLiveTrading", "positionSizeSol", "accountSizeSol",
+        "maxConcurrentPositions", "dailyLossLimitPct",
+      ];
+      const _hardLockedPrefixes = ["filters.", "sources."];
+      if (_hardLockedKeys.includes(key) || _hardLockedPrefixes.some((p) => key.startsWith(p))) {
+        return { text: `🔒 <code>${key}</code> locked for safety — edit on server` };
+      }
       try {
-        const { setConfigValue } = require("./config");
-        const result = setConfigValue(key, val);
+        const result = config.setConfigValue(key, val);
         return { text: `<code>${key}</code> → ${JSON.stringify(result)}` };
       } catch (err) {
         return { text: `${err.message}` };
       }
+    }
+
+    case "/pnl": {
+      const openPositions = positions.loadOpenPositions();
+      if (openPositions.length === 0) {
+        return {
+          text: "No open positions.",
+          keyboard: [[{ text: "🔄 Refresh", callback_data: "refresh_pnl" }]],
+        };
+      }
+      const lines = ["<b>💰 Live PnL</b>"];
+      let anyPrice = false;
+      for (const p of openPositions) {
+        const held = p.entryTime ? ((Date.now() - p.entryTime) / 3600000).toFixed(1) : "?";
+        let currentPrice;
+        try {
+          currentPrice = await jupiter.getUsdPrice(p.mint);
+        } catch {}
+        if (currentPrice != null) {
+          anyPrice = true;
+          const pnlPct = p.entryPriceEffective
+            ? (((currentPrice - p.entryPriceEffective) / p.entryPriceEffective) * 100).toFixed(2)
+            : "?";
+          const arrow = pnlPct !== "?" && parseFloat(pnlPct) >= 0 ? "🟢" : "🔴";
+          lines.push(
+            `${escapeHtml(p.symbol)} ${arrow}`,
+            `  Entry $${p.entryPriceEffective.toFixed(8)} → Current $${currentPrice.toFixed(8)}`,
+            `  PnL: ${pnlPct}% · Hold: ${held}h`
+          );
+        } else {
+          lines.push(
+            `${escapeHtml(p.symbol)} ⚪`,
+            `  Entry $${(p.entryPriceEffective || 0).toFixed(8)} → Price: ?`,
+            `  Hold: ${held}h`
+          );
+        }
+      }
+      if (!anyPrice) {
+        lines.push("(no price data)");
+      }
+      return {
+        text: lines.join("\n"),
+        keyboard: [[{ text: "🔄 Refresh", callback_data: "refresh_pnl" }]],
+      };
     }
 
     default:
