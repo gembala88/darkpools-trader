@@ -52,7 +52,12 @@ async function runLoop() {
   }
   let loopScanMs = cfg.execution?.loopScanMs || 60000;
 
-  let lastTelegramPoll = 0;
+  // start independent Telegram polling (does not block when trading loop is busy)
+  const pollIntervalMs = cfg.execution?.telegramPollMs || 2000;
+  setInterval(() => {
+    telegram.pollCommands().catch((e) => console.log("telegram poll error:", e.message));
+  }, pollIntervalMs);
+
   let lastDailyCheckKey = null;
   // per-position log suppression
   const _posLogCache = {}; // mint -> { lastPrice, lastPeak }
@@ -87,12 +92,6 @@ async function runLoop() {
     // re-sync monitored positions from file each tick (positions opened in prior
     // sessions or by other processes are picked up here)
     openPositions = positions.loadOpenPositions();
-
-    // Telegram command polling every 3s
-    if (now - lastTelegramPoll > 3000) {
-      lastTelegramPoll = now;
-      await telegram.pollCommands();
-    }
 
     // monitor ALL open positions (ALWAYS allowed, regardless of gate/kill switch)
     const maxConc = cfg.maxConcurrentPositions || 3;

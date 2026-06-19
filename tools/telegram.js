@@ -112,8 +112,12 @@ const _buttonRoutes = {
   "▶️ resume": "/resume",
 };
 
+let _polling = false;
+
 async function pollCommands() {
   if (!_isEnabled()) return;
+  if (_polling) return;
+  _polling = true;
 
   try {
     const url = `https://api.telegram.org/bot${_token}/getUpdates`;
@@ -218,7 +222,14 @@ async function pollCommands() {
       }
     }
   } catch (err) {
+    const status = err.response?.status;
+    if (status === 409) {
+      // 409 Conflict is normal when multiple pollers overlap — ignore
+      return;
+    }
     console.log("telegram poll error:", err.message);
+  } finally {
+    _polling = false;
   }
 }
 
