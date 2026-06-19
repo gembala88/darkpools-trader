@@ -90,6 +90,28 @@ async function _sendTyping(chatId) {
   });
 }
 
+function _replyKeyboard() {
+  return {
+    keyboard: [
+      [{ text: "📊 Status" }, { text: "📈 Report" }],
+      [{ text: "🔔 Notif" }, { text: "⚙️ Config" }],
+      [{ text: "⏸️ Stop" }, { text: "▶️ Resume" }],
+    ],
+    resize_keyboard: true,
+    is_persistent: true,
+  };
+}
+
+// button label routing map
+const _buttonRoutes = {
+  "📊 status": "/status",
+  "📈 report": "/report",
+  "🔔 notif": "/menu",
+  "⚙️ config": "/config",
+  "⏸️ stop": "/stop",
+  "▶️ resume": "/resume",
+};
+
 async function pollCommands() {
   if (!_isEnabled()) return;
 
@@ -115,7 +137,20 @@ async function pollCommands() {
         if (!authorizedChats.some((c) => String(c) === chatId)) continue;
 
         try {
-          if (data.startsWith("toggle:")) {
+          if (data === "confirm_stop") {
+            riskManager.setKillSwitch(true);
+            await _call("answerCallbackQuery", {
+              callback_query_id: cq.id,
+              text: "⏸️ STOP confirmed — no new entries",
+              show_alert: true,
+            });
+            await _call("editMessageText", {
+              chat_id: chatId,
+              message_id: msgId,
+              text: "🔴 KILL SWITCH ON — no new entries",
+              parse_mode: "HTML",
+            });
+          } else if (data.startsWith("toggle:")) {
             const key = data.replace("toggle:", "");
             const cfg = require("./config").loadConfig();
             const current = cfg.telegram?.notify?.[key];
@@ -156,7 +191,15 @@ async function pollCommands() {
       if (chatIdStr !== String(_chatId)) continue;
 
       await _sendTyping(msg.chat.id);
-      const reply = await _handleCommand(msg.text.trim());
+
+      // route button labels to commands
+      let cmdText = msg.text.trim();
+      const normalized = cmdText.toLowerCase().replace(/\ufe0f/g, ""); // strip variation-selector from emoji
+      if (_buttonRoutes[normalized]) {
+        cmdText = _buttonRoutes[normalized];
+      }
+
+      const reply = await _handleCommand(cmdText);
       if (reply) {
         let payload = {
           chat_id: msg.chat.id,
@@ -164,8 +207,12 @@ async function pollCommands() {
           parse_mode: "HTML",
           reply_to_message_id: msg.message_id,
         };
-        if (reply.keyboard) {
+        if (reply.replyKeyboard) {
+          payload.reply_markup = _replyKeyboard();
+        } else if (reply.keyboard) {
           payload.reply_markup = { inline_keyboard: reply.keyboard };
+        } else {
+          payload.reply_markup = _replyKeyboard();
         }
         await _call("sendMessage", payload);
       }
@@ -198,21 +245,17 @@ async function _handleCommand(text) {
     case "/help":
       return {
         text: [
-          "<b>Commands</b>",
-          "/stop — kill switch ON",
-          "/resume — kill switch OFF",
-          "/status — PnL, positions, state",
-          "/config — show settings",
-          "/set &lt;key&gt; &lt;value&gt; — change whitelisted setting",
-          "/menu — toggle notifications",
-          "/report — closed trade summary",
-          "/help — this list",
+          "<b>🤖 darkpools-trader</b>",
+          "Use the buttons below or type /help for commands.",
         ].join("\n"),
+        replyKeyboard: true,
       };
 
     case "/stop":
-      riskManager.setKillSwitch(true);
-      return { text: "🔴 KILL SWITCH ON — no new entries" };
+      return {
+        text: "⏸️ Confirm STOP? This halts all new entries.",
+        keyboard: [[{ text: "Confirm STOP", callback_data: "confirm_stop" }]],
+      };
 
     case "/resume":
       riskManager.setKillSwitch(false);
@@ -327,7 +370,7 @@ function _tokenLinks(mint) {
 // notifications
 async function notifyStart() {
   if (!_config?.telegram?.notify?.onStart) return;
-  await send("🤖 darkpools-trader started (dry_run)");
+  await send("🤖 darkpools-trader started (dry_run)", { reply_markup: _replyKeyboard() });
 }
 
 async function notifyError(errMsg) {
