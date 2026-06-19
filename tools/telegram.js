@@ -104,6 +104,46 @@ async function pollCommands() {
     for (const u of updates) {
       _offset = u.update_id + 1;
 
+      // callback_query (inline button press)
+      if (u.callback_query) {
+        const cq = u.callback_query;
+        const chatId = cq.message?.chat?.id;
+        const msgId = cq.message?.message_id;
+        const data = cq.data || "";
+
+        const authorizedChats = [_chatId, _channelId].filter(Boolean);
+        if (!authorizedChats.some((c) => String(c) === chatId)) continue;
+
+        try {
+          if (data.startsWith("toggle:")) {
+            const key = data.replace("toggle:", "");
+            const cfg = require("./config").loadConfig();
+            const current = cfg.telegram?.notify?.[key];
+            const newVal = current === true ? "false" : "true";
+            require("./config").setConfigValue(`telegram.notify.${key}`, newVal);
+            // answer callback
+            await _call("answerCallbackQuery", {
+              callback_query_id: cq.id,
+              text: `${key} → ${newVal === "true" ? "ON" : "OFF"}`,
+              show_alert: false,
+            });
+            // edit message to reflect new states
+            const updatedCfg = require("./config").loadConfig();
+            const keyboard = _menuKeyboard(updatedCfg);
+            await _call("editMessageText", {
+              chat_id: chatId,
+              message_id: msgId,
+              text: "<b>🔔 Notification Toggles</b>\nTap to toggle:",
+              parse_mode: "HTML",
+              reply_markup: { inline_keyboard: keyboard },
+            });
+          }
+        } catch (err) {
+          console.log("callback handler error:", err.message);
+        }
+        continue;
+      }
+
       const msg = u.message;
       if (!msg || !msg.text) continue;
 
@@ -118,17 +158,34 @@ async function pollCommands() {
       await _sendTyping(msg.chat.id);
       const reply = await _handleCommand(msg.text.trim());
       if (reply) {
-        await _call("sendMessage", {
+        let payload = {
           chat_id: msg.chat.id,
-          text: reply,
+          text: reply.text || reply,
           parse_mode: "HTML",
           reply_to_message_id: msg.message_id,
-        });
+        };
+        if (reply.keyboard) {
+          payload.reply_markup = { inline_keyboard: reply.keyboard };
+        }
+        await _call("sendMessage", payload);
       }
     }
   } catch (err) {
     console.log("telegram poll error:", err.message);
   }
+}
+
+function _menuKeyboard(cfg) {
+  const n = cfg?.telegram?.notify || {};
+  const btn = (key, label) => ({
+    text: `${label}: ${n[key] ? "✅ ON" : "⬜ OFF"}`,
+    callback_data: `toggle:${key}`,
+  });
+  return [
+    [btn("onEntry", "Entry")],
+    [btn("onExit", "Exit")],
+    [btn("onScreening", "Screening")],
+  ];
 }
 
 async function _handleCommand(text) {
@@ -137,19 +194,36 @@ async function _handleCommand(text) {
   const args = parts.slice(1);
 
   switch (cmd) {
+    case "/start":
+    case "/help":
+      return {
+        text: [
+          "<b>Commands</b>",
+          "/stop — kill switch ON",
+          "/resume — kill switch OFF",
+          "/status — PnL, positions, state",
+          "/config — show settings",
+          "/set &lt;key&gt; &lt;value&gt; — change whitelisted setting",
+          "/menu — toggle notifications",
+          "/report — closed trade summary",
+          "/help — this list",
+        ].join("\n"),
+      };
+
     case "/stop":
       riskManager.setKillSwitch(true);
-      return "🔴 KILL SWITCH ON — no new entries";
+      return { text: "🔴 KILL SWITCH ON — no new entries" };
 
     case "/resume":
       riskManager.setKillSwitch(false);
-      return "🟢 KILL SWITCH OFF — entries allowed";
+      return { text: "🟢 KILL SWITCH OFF — entries allowed" };
 
     case "/status": {
       const state = riskManager.loadState();
       const cfg = require("./config").loadConfig();
       const openPositions = require("./positions").loadOpenPositions();
-      let lines = [
+      const jupiter = require("./signals/jupiter");
+      const lines = [
         `<b>Status</b>`,
         `Mode: ${cfg.mode}`,
         `Kill switch: ${state.killSwitch ? "🔴 ON" : "🟢 OFF"}`,
@@ -158,44 +232,73 @@ async function _handleCommand(text) {
         `Trades today: ${state.tradesToday}`,
       ];
       if (openPositions.length > 0) {
-        const p = openPositions[0];
-        const unrealized = p.entryPriceEffective
-          ? ((p.peakPrice - p.entryPriceEffective) / p.entryPriceEffective * 100).toFixed(2)
-          : "?";
-        lines.push(`\n<b>Open position</b>`);
-        lines.push(`${p.symbol} | entry ${p.entryPriceEffective.toFixed(8)} | unrealized ${unrealized}%`);
+        lines.push(`\n<b>Open positions (${openPositions.length})</b>`);
+        for (const p of openPositions) {
+          const held = p.entryTime ? ((Date.now() - p.entryTime) / 3600000).toFixed(1) : "?";
+          let unrealized;
+          try {
+            const now = await jupiter.getUsdPrice(p.mint);
+            unrealized = now && p.entryPriceEffective
+              ? (((now - p.entryPriceEffective) / p.entryPriceEffective) * 100).toFixed(2)
+              : "?";
+          } catch {
+            unrealized = "?";
+          }
+          lines.push(`${escapeHtml(p.symbol)} | entry $${(p.entryPriceEffective || 0).toFixed(8)} | ${held}h | unreal ${unrealized}%`);
+        }
       }
-      return lines.join("\n");
+      return { text: lines.join("\n") };
+    }
+
+    case "/menu": {
+      const cfg = require("./config").loadConfig();
+      return {
+        text: "<b>🔔 Notification Toggles</b>\nTap to toggle:",
+        keyboard: _menuKeyboard(cfg),
+      };
+    }
+
+    case "/report": {
+      const { loadAllPositions, buildReport } = require("./reporter");
+      const positions = loadAllPositions();
+      const report = buildReport(positions);
+      if (report.totalClosed === 0) {
+        return { text: "📊 0 closed trades yet" };
+      }
+      const lines = [
+        `<b>📊 Trade Report</b>`,
+        `Closed: ${report.totalClosed}`,
+        `Win rate: ${report.winRatePct != null ? report.winRatePct.toFixed(1) + "%" : "?"}`,
+        `Total PnL: ${report.totalPnlSol >= 0 ? "🟢" : "🔴"} ${report.totalPnlSol.toFixed(6)} SOL`,
+        `Avg PnL: ${report.avgPnlSol != null ? report.avgPnlSol.toFixed(6) + " SOL" : "?"}`,
+        `Best: ${report.biggestWinSol != null ? report.biggestWinSol.toFixed(6) + " SOL" : "?"}`,
+        `Worst: ${report.biggestLossSol != null ? report.biggestLossSol.toFixed(6) + " SOL" : "?"}`,
+        `Breakdown:`,
+        `  SL: ${report.exitBreakdown?.SL || 0}`,
+        `  TP: ${report.exitBreakdown?.partialTP || 0}`,
+        `  Trailing: ${report.exitBreakdown?.trailing || 0}`,
+        `  MaxHold: ${report.exitBreakdown?.maxHold || 0}`,
+      ];
+      return { text: lines.join("\n") };
     }
 
     case "/config": {
       const { getConfigView } = require("./config");
-      return `<pre>${getConfigView()}</pre>`;
+      return { text: `<pre>${getConfigView()}</pre>` };
     }
 
     case "/set": {
-      if (args.length < 2) return "Usage: /set &lt;key&gt; &lt;value&gt;";
+      if (args.length < 2) return { text: "Usage: /set &lt;key&gt; &lt;value&gt;" };
       const key = args[0];
       const val = args.slice(1).join(" ");
       try {
         const { setConfigValue } = require("./config");
         const result = setConfigValue(key, val);
-        return `✅ <code>${key}</code> → ${JSON.stringify(result)}`;
+        return { text: `<code>${key}</code> → ${JSON.stringify(result)}` };
       } catch (err) {
-        return `❌ ${err.message}`;
+        return { text: `${err.message}` };
       }
     }
-
-    case "/help":
-      return [
-        "<b>Commands</b>",
-        "/stop — kill switch ON",
-        "/resume — kill switch OFF",
-        "/status — PnL, positions, state",
-        "/config — show settings",
-        "/set &lt;key&gt; &lt;value&gt; — change whitelisted setting",
-        "/help — this list",
-      ].join("\n");
 
     default:
       return null; // unknown command, no reply

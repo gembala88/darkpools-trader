@@ -30,7 +30,9 @@
     "strategy.trendFollowing.rsiMin",
     "strategy.trendFollowing.rsiMax",
     "decision.eligibleTimings",
-    "telegram.notify.onScreening"
+    "telegram.notify.onScreening",
+    "telegram.notify.onEntry",
+    "telegram.notify.onExit"
   ],
   "positionSizeSol": 0.05,
   "maxConcurrentPositions": 3,
