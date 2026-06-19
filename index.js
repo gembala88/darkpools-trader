@@ -81,6 +81,10 @@ async function runLoop() {
     }
     loopScanMs = cfg.execution?.loopScanMs || 60000;
 
+    // re-sync monitored positions from file each tick (positions opened in prior
+    // sessions or by other processes are picked up here)
+    openPositions = positions.loadOpenPositions();
+
     // Telegram command polling every 3s
     if (now - lastTelegramPoll > 3000) {
       lastTelegramPoll = now;

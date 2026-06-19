@@ -333,6 +333,26 @@ if (require.main === module && process.argv.includes("--test")) {
 
   fs.writeFileSync(testFile, "[]");
 
+  // 10. Re-sync from file (simulate restart recovery)
+  const posR = openPosition({ mint: "RestartToken", symbol: "RTST" }, 1.0, config);
+  assert("restart: position opened", posR !== null && posR.status === "open");
+  // advance peak (simulate price rise)
+  evaluateExit(posR, 1.30, null, config);
+  savePosition(posR);
+  assert("restart: peak persisted to file", posR.peakPrice === 1.30);
+  // reload from file (simulate restart)
+  const reloaded = loadOpenPositions();
+  const found = reloaded.find((p) => p.mint === "RestartToken");
+  assert("restart: position found after reload", found !== undefined);
+  assert("restart: peakPrice preserved after reload", found.peakPrice === 1.30);
+  // SL still fires
+  const slReason = evaluateExit(found, 0.85, null, config);
+  assert("restart: SL triggers after reload", slReason !== null && slReason.type === "SL");
+  closeRemaining(found, slReason, 0.85, config);
+  assert("restart: status closed after SL", found.status === "closed");
+
+  fs.writeFileSync(testFile, "[]");
+
   clean();
   console.log(`\n${failures === 0 ? "ALL PASS" : `${failures} FAILURE(S)`}`);
   process.exit(failures > 0 ? 1 : 0);
