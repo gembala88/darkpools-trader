@@ -78,6 +78,11 @@
       "gmgnTimeoutMs": 8000,
       "gmgnCacheMs": 120000
     },
+    "geckoterminalTrending": {
+      "enabled": true,
+      "kind": "discovery",
+      "limit": 20
+    },
     "signalServer": {
       "enabled": false,
       "kind": "discovery"

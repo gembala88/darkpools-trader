@@ -24,7 +24,7 @@ try {
   console.log(`       mode=${cfg.mode} | accountSize=${cfg.accountSizeSol} SOL | positionSize=${cfg.positionSizeSol} SOL`);
   console.log(`       TP=${cfg.takeProfitPct}% / SL=${cfg.stopLossPct}% | trailing=${cfg.trailingEnabled} | maxHold=${cfg.maxHoldHours}h`);
   console.log(`       telegram=${cfg.telegramEnabled} | dayBoundary=${cfg.dayBoundary}`);
-  console.log(`       sources: dexscreener=${cfg.sources?.dexscreener?.enabled} gmgn=${cfg.sources?.gmgn?.enabled} signalServer=${cfg.sources?.signalServer?.enabled}`);
+  console.log(`       sources: dexscreener=${cfg.sources?.dexscreener?.enabled} gmgn=${cfg.sources?.gmgn?.enabled} geckoterminalTrending=${cfg.sources?.geckoterminalTrending?.enabled} signalServer=${cfg.sources?.signalServer?.enabled}`);
 } catch (err) {
   fail("loadConfig() threw", err.message);
 }
@@ -48,6 +48,7 @@ const modules = [
   { path: "tools/signals/dexscreener.js", exports: ["fetchTrending"] },
   { path: "tools/signals/jupiter.js", exports: ["enrichPrices"] },
   { path: "tools/signals/gmgn.js", exports: ["fetchTrending"] },
+  { path: "tools/signals/geckoterminalTrending.js", exports: ["fetchTrending"] },
   { path: "tools/signals/signalServer.js", exports: ["fetchCandidates"] },
   { path: "tools/signals/holders.js", exports: ["getTopHolderPct", "clearCache"] },
   { path: "tools/signals/candles.js", exports: ["getCandles", "clearCache"] },

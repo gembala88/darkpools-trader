@@ -36,6 +36,15 @@ async function getCandidates(config) {
     }
   }
 
+  if (sources.geckoterminalTrending?.enabled) {
+    try {
+      const gt = await require("./geckoterminalTrending").fetchTrending();
+      all = all.concat(gt);
+    } catch (err) {
+      console.log("geckoterminalTrending source error:", err.message);
+    }
+  }
+
   // dedupe by mint — keep entry with most non-null fields
   const deduped = new Map();
   for (const c of all) {
