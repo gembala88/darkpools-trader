@@ -24,15 +24,24 @@ function loadConfig() {
   const path = require("path");
 
   const configPath = path.resolve(__dirname, "user-config.json");
+  const examplePath = path.resolve(__dirname, "user-config.example.json");
 
   let cfg;
   try {
     const raw = fs.readFileSync(configPath, "utf-8");
     cfg = JSON.parse(raw);
   } catch (err) {
-    throw new Error(
-      `Cannot read/parse user-config.json at ${configPath}: ${err.message}`
-    );
+    // fallback to example if user-config.json is missing
+    try {
+      const example = fs.readFileSync(examplePath, "utf-8");
+      cfg = JSON.parse(example);
+      console.log(`WARN: user-config.json not found, loaded user-config.example.json as fallback.`);
+      console.log(`      Copy user-config.example.json to user-config.json and edit for your deployment.`);
+    } catch {
+      throw new Error(
+        `Cannot read/parse user-config.json at ${configPath}: ${err.message}`
+      );
+    }
   }
 
   // mode

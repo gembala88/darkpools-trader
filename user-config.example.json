@@ -73,7 +73,7 @@
       "kind": "discovery"
     },
     "gmgn": {
-      "enabled": true,
+      "enabled": false,
       "kind": "discovery",
       "gmgnTimeoutMs": 8000,
       "gmgnCacheMs": 120000
@@ -87,7 +87,7 @@
       "kind": "enrichment"
     },
     "heliusHolders": {
-      "enabled": true,
+      "enabled": false,
       "kind": "enrichment"
     },
     "geckoterminalOhlc": {
