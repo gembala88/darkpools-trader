@@ -30,11 +30,7 @@ function _saveAll(positions) {
 
 function loadOpenPositions() {
   const all = _loadAll();
-  const open = all.filter((p) => p.status === "open");
-  if (open.length > 0) {
-    console.log(`resumed ${open.length} open position(s)`);
-  }
-  return open;
+  return all.filter((p) => p.status === "open");
 }
 
 function _applySlippage(price, side, slippagePct) {

@@ -47,6 +47,9 @@ async function runLoop() {
   console.log("darkpools-trader | mode:", cfg.mode, "| starting dry_run loop");
 
   let openPositions = positions.loadOpenPositions();
+  if (openPositions.length > 0) {
+    console.log(`resumed ${openPositions.length} open position(s)`);
+  }
   let loopScanMs = cfg.execution?.loopScanMs || 60000;
 
   let lastTelegramPoll = 0;
