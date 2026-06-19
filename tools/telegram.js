@@ -202,6 +202,25 @@ async function _handleCommand(text) {
   }
 }
 
+function escapeHtml(str) {
+  if (str == null) return "";
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function _tokenLinks(mint) {
+  if (!mint) return "";
+  const e = escapeHtml;
+  return [
+    `🔗 <a href="https://gmgn.ai/sol/token/${e(mint)}">GMGN</a>`,
+    `<a href="https://dexscreener.com/solana/${e(mint)}">DEX</a>`,
+    `<a href="https://solscan.io/token/${e(mint)}">Solscan</a>`,
+  ].join(" · ");
+}
+
 // notifications
 async function notifyStart() {
   if (!_config?.telegram?.notify?.onStart) return;
@@ -210,16 +229,30 @@ async function notifyStart() {
 
 async function notifyError(errMsg) {
   if (!_config?.telegram?.notify?.onError) return;
-  await send(`❌ ERROR: ${errMsg.slice(0, 500)}`);
+  await send(`❌ ERROR: ${escapeHtml(errMsg).slice(0, 500)}`);
 }
 
 async function notifyEntry(position) {
   if (!_config?.telegram?.notify?.onEntry) return;
-  const msg =
-    `<b>🟢 SIM BUY ${position.symbol}</b>\n` +
-    `@ ${position.entryPriceEffective.toFixed(8)} (quoted ${position.entryPriceQuoted.toFixed(8)})\n` +
-    `Size: ${position.sizeSol} SOL | Qty: ${position.qtyTokens.toFixed(4)}`;
-  const result = await send(msg);
+  const sym = escapeHtml(position.symbol || "?");
+  const lines = [
+    `<b>🟢 SIM BUY · ${sym}</b>`,
+    `Entry: $${(position.entryPriceEffective || 0).toFixed(8)} (quoted $${(position.entryPriceQuoted || 0).toFixed(8)})`,
+    `Size: ${position.sizeSol || "?"} SOL · Qty: ${(position.qtyTokens || 0).toFixed(4)}`,
+  ];
+
+  // optional metrics from candidate (attached in index.js before calling)
+  const extras = [];
+  const t = position._timing || {};
+  if (t.rsi != null) extras.push(`RSI: ${t.rsi}`);
+  if (position.liquidityUsd != null) extras.push(`Liq: $${Number(position.liquidityUsd).toLocaleString()}`);
+  if (position.volume24hUsd != null) extras.push(`Vol: $${Number(position.volume24hUsd).toLocaleString()}`);
+  if (position.feeConfirm?.signal && position.feeConfirm.signal !== "unknown") extras.push(`Fee: ${position.feeConfirm.signal}`);
+  if (position._regime) extras.push(`Regime: ${position._regime}`);
+  if (extras.length) lines.push(extras.join(" · "));
+
+  lines.push(_tokenLinks(position.mint));
+  const result = await send(lines.join("\n"));
 
   if (_config.telegram?.pinOnEntry && result?.dm) {
     await pin(_chatId, result.dm);
@@ -228,11 +261,31 @@ async function notifyEntry(position) {
 
 async function notifyExit(position, exit, isFullClose) {
   if (!_config?.telegram?.notify?.onExit) return;
-  const msg =
-    `<b>${isFullClose ? "🔴 CLOSE" : "🔶 PARTIAL"} ${position.symbol}</b>\n` +
-    `${exit.reason} | ${exit.pctOfPosition}% @ ${exit.priceEffective.toFixed(8)}\n` +
-    `PnL: ${exit.pnlSol >= 0 ? "🟢" : "🔴"} ${exit.pnlSol.toFixed(6)} SOL`;
-  await send(msg);
+  const sym = escapeHtml(position.symbol || "?");
+  const pnl = exit.pnlSol || 0;
+  const entryEff = position.entryPriceEffective;
+  const exitEff = exit.priceEffective;
+  const pnlPct = entryEff && exitEff ? (((exitEff - entryEff) / entryEff) * 100).toFixed(2) : "?";
+  const heldHours = position.entryTime ? ((Date.now() - position.entryTime) / 3600000).toFixed(1) : "?";
+
+  const lines = [
+    `<b>${isFullClose ? "🔴 CLOSE" : "🔶 PARTIAL"} · ${sym}</b>`,
+    `${escapeHtml(exit.reason || "?")} · ${exit.pctOfPosition || "?"}% @ $${(exitEff || 0).toFixed(8)}`,
+    `PnL: ${pnl >= 0 ? "🟢" : "🔴"} ${pnl.toFixed(6)} SOL (${pnlPct}%)`,
+    `Held: ${heldHours}h`,
+  ];
+
+  // day PnL if risk state available
+  try {
+    const state = riskManager.loadState();
+    if (state && state.realizedPnlTodaySol != null) {
+      const d = state.realizedPnlTodaySol;
+      lines.push(`Day PnL: ${d >= 0 ? "🟢" : "🔴"} ${d.toFixed(6)} SOL`);
+    }
+  } catch {}
+
+  lines.push(_tokenLinks(position.mint));
+  await send(lines.join("\n"));
 
   if (isFullClose && _lastPinnedMsgId) {
     await unpin(_chatId, _lastPinnedMsgId);

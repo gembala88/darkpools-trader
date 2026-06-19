@@ -205,6 +205,14 @@ async function runLoop() {
             if (newPos) {
               openPositions.push(newPos);
               riskManager.recordTradeOpened(riskState);
+              // attach candidate fields for richer notification
+              if (pickCandidate) {
+                newPos.liquidityUsd = pickCandidate.candidate?.liquidityUsd;
+                newPos.volume24hUsd = pickCandidate.candidate?.volume24hUsd;
+                newPos.feeConfirm = pickCandidate.feeConfirm;
+                newPos._regime = regime.regime;
+                newPos._timing = pickCandidate.timing || {};
+              }
               telegram.notifyEntry(newPos);
             }
           } else {
