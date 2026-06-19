@@ -158,6 +158,7 @@ async function runLoop() {
 
         const regime = await assessRegime(result.ranked, cfg);
         result.regime = regime;
+        telegram.notifyScreening(result, cfg);
         if (regime.regime === "risk_off") {
           console.log(`ENTRY HELD: market risk_off (${regime.reason})`);
           continue;

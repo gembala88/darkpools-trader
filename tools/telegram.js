@@ -293,6 +293,31 @@ async function notifyExit(position, exit, isFullClose) {
   }
 }
 
+async function notifyScreening(result, config) {
+  if (!config?.telegram?.notify?.onScreening) return;
+  try {
+    const top = (result.ranked || []).slice(0, 3);
+    const topLine = top
+      .map((c) => {
+        const sym = escapeHtml(c.symbol || c.mint?.slice(0, 8) || "?");
+        const sig = c.timing?.signal || "?";
+        const rsi = c.timing?.indicators?.rsi != null ? ` R${c.timing.indicators.rsi}` : "";
+        return `${sym} ${sig}${rsi}`;
+      })
+      .join(" · ");
+    const msg =
+      `🔍 Scan: ${result.scannedCount || "?"} · Safe: ${result.safeCount || "?"}\n` +
+      `Top: ${topLine || "—"}`;
+    await _call("sendMessage", {
+      chat_id: _chatId,
+      text: msg,
+      parse_mode: "HTML",
+    });
+  } catch (err) {
+    console.log("notifyScreening error:", err.message);
+  }
+}
+
 async function notifyDailySummary(state, config) {
   if (!config?.telegram?.notify?.dailySummary) return;
   const yesterday = state.yesterdayPnlSol || 0;
@@ -347,6 +372,7 @@ module.exports = {
   notifyError,
   notifyEntry,
   notifyExit,
+  notifyScreening,
   notifyDailySummary,
   checkDailyRollover,
 };

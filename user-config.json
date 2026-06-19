@@ -29,7 +29,8 @@
     "telegramEnabled",
     "strategy.trendFollowing.rsiMin",
     "strategy.trendFollowing.rsiMax",
-    "decision.eligibleTimings"
+    "decision.eligibleTimings",
+    "telegram.notify.onScreening"
   ],
   "positionSizeSol": 0.05,
   "maxConcurrentPositions": 3,
