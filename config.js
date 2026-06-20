@@ -219,7 +219,6 @@ function getConfigView(cfg) {
 }
 
 function setConfigValue(path, value) {
-  const fs = require("fs");
   const cfgPath = require("path").resolve(__dirname, "user-config.json");
   const cfg = loadConfig();
   const whitelist = cfg.configSettableWhitelist || [];
@@ -271,4 +270,59 @@ function setConfigValue(path, value) {
   return parsedValue;
 }
 
-module.exports = { HARD_CAPS, loadConfig, getConfigView, setConfigValue };
+function setConfigValueUnsafeServer(path, value) {
+  const fs = require("fs");
+  const cfgPath = require("path").resolve(__dirname, "user-config.json");
+  const cfg = loadConfig();
+
+  // parse value
+  let parsedValue;
+  try {
+    parsedValue = JSON.parse(value);
+  } catch {
+    parsedValue = value;
+  }
+
+  // read old value for display
+  const keys = path.split(".");
+  let oldObj = cfg;
+  for (let i = 0; i < keys.length - 1; i++) {
+    if (oldObj[keys[i]] == null) oldObj[keys[i]] = {};
+    oldObj = oldObj[keys[i]];
+  }
+  const oldValue = oldObj[keys[keys.length - 1]];
+
+  // apply to a COPY and validate
+  const copy = JSON.parse(JSON.stringify(cfg));
+  let obj = copy;
+  for (let i = 0; i < keys.length - 1; i++) {
+    if (obj[keys[i]] == null) obj[keys[i]] = {};
+    obj = obj[keys[i]];
+  }
+  obj[keys[keys.length - 1]] = parsedValue;
+
+  // backup
+  const bakPath = cfgPath + ".bak";
+  fs.copyFileSync(cfgPath, bakPath);
+
+  // validate via temp write — never leave half-written file
+  const tmpPath = cfgPath + ".tmp";
+  fs.writeFileSync(tmpPath, JSON.stringify(copy, null, 2));
+  try {
+    const original = fs.readFileSync(cfgPath, "utf-8");
+    fs.writeFileSync(cfgPath, fs.readFileSync(tmpPath, "utf-8"));
+    try {
+      loadConfig();
+    } finally {
+      fs.writeFileSync(cfgPath, original);
+    }
+  } finally {
+    try { fs.unlinkSync(tmpPath); } catch {}
+  }
+
+  // write for real
+  fs.writeFileSync(cfgPath, JSON.stringify(copy, null, 2));
+  return { oldValue, parsedValue };
+}
+
+module.exports = { HARD_CAPS, loadConfig, getConfigView, setConfigValue, setConfigValueUnsafeServer };

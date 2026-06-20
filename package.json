@@ -24,7 +24,8 @@
     "scam:test": "node tools/filters/scam.js --test",
     "gmgn:test": "node tools/signals/gmgn.js --test",
     "feeconfirm:test": "node tools/signals/gmgn.js --test",
-    "regime:test": "node tools/filters/regime.js --test"
+    "regime:test": "node tools/filters/regime.js --test",
+    "set": "node scripts/setconfig.js"
   },
   "dependencies": {
     "dotenv": "^16.4.7",

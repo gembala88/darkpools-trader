@@ -5,3 +5,4 @@ user-config.json
 *.sqlite-journal
 data/*.json
 !data/.gitkeep
+*.bak
