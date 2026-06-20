@@ -83,6 +83,7 @@ async function openPosition(candidate, currentPrice, config) {
     feeConfirm: candidate.feeConfirm ?? null,
     _timing: candidate.timing ?? null,
     tokenDecimals: null,
+    pairAddress: candidate.candidate?.pairAddress ?? candidate.pairAddress ?? null,
   };
 
   if (config.mode === "live") {

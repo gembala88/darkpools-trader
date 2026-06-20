@@ -89,7 +89,7 @@ async function scan(config) {
   }));
 
   withScores.sort((a, b) => b.score - a.score);
-  const topN = config.scoring.topN || 10;
+  const topN = config.scoring.topN || 5;
   const ranked = withScores.slice(0, topN);
 
   // timing: fetch candles + run strategy only for top N (not all safe candidates)

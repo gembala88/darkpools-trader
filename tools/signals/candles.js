@@ -29,7 +29,7 @@ function _cacheMs() {
   return _getCfgVal("execution.candleCacheMs", 600000);
 }
 function _requestDelayMs() {
-  return _getCfgVal("execution.candleRequestDelayMs", 2500);
+  return _getCfgVal("execution.candleRequestDelayMs", 1500);
 }
 
 async function _throttle() {

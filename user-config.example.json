@@ -107,7 +107,7 @@
     "loopScanMs": 60000,
     "loopMonitorMs": 10000,
     "candleCacheMs": 600000,
-    "candleRequestDelayMs": 2500
+    "candleRequestDelayMs": 1500
   },
   "decision": {
     "eligibleTimings": [
@@ -131,7 +131,7 @@
     "wLiquidity": 0.4,
     "wVolume": 0.4,
     "wAge": 0.2,
-    "topN": 10
+    "topN": 5
   },
   "strategy": {
     "active": "trendFollowing",

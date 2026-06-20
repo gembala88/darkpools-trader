@@ -1,7 +1,32 @@
 const axios = require("axios");
+const fs = require("fs");
+const path = require("path");
 
 const _boostCache = { boosted: null, fetchedAt: 0, ttlMs: 60000 };
 const _pairCache = {};
+const _pairFile = path.resolve(__dirname, "..", "..", "data", "pair-cache.json");
+
+function _loadPairFile() {
+  try {
+    const raw = fs.readFileSync(_pairFile, "utf-8");
+    const data = JSON.parse(raw);
+    if (typeof data === "object" && data !== null) {
+      Object.assign(_pairCache, data);
+    }
+  } catch {}
+}
+
+function _savePairFile() {
+  try {
+    const dir = path.dirname(_pairFile);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(_pairFile, JSON.stringify(_pairCache, null, 2));
+  } catch (err) {
+    console.log(`dexscreener: pair-cache write error: ${err.message}`);
+  }
+}
+
+_loadPairFile();
 
 function _emptyBoost() {
   _boostCache.boosted = null;
@@ -51,6 +76,7 @@ async function _fetchPairs(mint) {
       ) || pairs.find((p) => p.chainId === "solana");
       if (solPair) {
         _pairCache[mint] = solPair;
+        _savePairFile();
         return solPair;
       }
     }
@@ -63,14 +89,31 @@ async function _fetchPairs(mint) {
   }
 }
 
+async function _mapConcurrent(items, fn, concurrency) {
+  const results = [];
+  const running = new Set();
+  for (const item of items) {
+    const p = fn(item).finally(() => running.delete(p));
+    running.add(p);
+    results.push(p);
+    if (running.size >= concurrency) {
+      await Promise.race(running);
+    }
+  }
+  return Promise.all(results);
+}
+
 async function fetchTrending() {
   const boosted = await _fetchBoostList();
 
-  const results = [];
-  for (const t of boosted) {
+  const pairResults = await _mapConcurrent(boosted, async (t) => {
     const pair = await _fetchPairs(t.tokenAddress);
+    return { pair, t };
+  }, 5);
+
+  const results = pairResults.map(({ pair, t }) => {
     if (pair) {
-      results.push({
+      return {
         source: "dexscreener",
         chain: "solana",
         mint: t.tokenAddress,
@@ -87,25 +130,23 @@ async function fetchTrending() {
         pairAddress: pair.pairAddress || null,
         dexId: pair.dexId || null,
         raw: { boost: t, pair },
-      });
-    } else {
-      // fallback with just boost data
-      results.push({
-        source: "dexscreener",
-        chain: "solana",
-        mint: t.tokenAddress,
-        symbol: t.symbol || null,
-        priceUsd: null,
-        liquidityUsd: null,
-        volume24hUsd: null,
-        pairCreatedAt: null,
-        ageHours: null,
-        pairAddress: null,
-        dexId: null,
-        raw: { boost: t },
-      });
+      };
     }
-  }
+    return {
+      source: "dexscreener",
+      chain: "solana",
+      mint: t.tokenAddress,
+      symbol: t.symbol || null,
+      priceUsd: null,
+      liquidityUsd: null,
+      volume24hUsd: null,
+      pairCreatedAt: null,
+      ageHours: null,
+      pairAddress: null,
+      dexId: null,
+      raw: { boost: t },
+    };
+  });
 
   return results;
 }
