@@ -22,6 +22,38 @@ const PNL_REFRESH_MS = 30000;
 // settings menu state (per chat)
 const _settingsState = {}; // { [chatId]: { category } }
 
+// value adjustment steps per key (for inline buttons)
+const KEY_ADJUSTMENTS = {
+  takeProfitPct: [{ label: "-5%", val: -5 }, { label: "-1%", val: -1 }, { label: "+1%", val: 1 }, { label: "+5%", val: 5 }],
+  stopLossPct: [{ label: "-2%", val: -2 }, { label: "-1%", val: -1 }, { label: "+1%", val: 1 }, { label: "+2%", val: 2 }],
+  positionSizeSol: [{ label: "-0.1", val: -0.1 }, { label: "-0.05", val: -0.05 }, { label: "+0.05", val: 0.05 }, { label: "+0.1", val: 0.1 }],
+  maxHoldHours: [{ label: "-2h", val: -2 }, { label: "-1h", val: -1 }, { label: "+1h", val: 1 }, { label: "+2h", val: 2 }],
+  maxConcurrentPositions: [{ label: "-1", val: -1 }, { label: "+1", val: 1 }],
+  dailyLossLimitPct: [{ label: "-2%", val: -2 }, { label: "-1%", val: -1 }, { label: "+1%", val: 1 }, { label: "+2%", val: 2 }],
+  cooldownMinutesBetweenTrades: [{ label: "-10m", val: -10 }, { label: "-5m", val: -5 }, { label: "+5m", val: 5 }, { label: "+10m", val: 10 }],
+  "filters.minLiquidityUsd": [{ label: "-10k", val: -10000 }, { label: "-5k", val: -5000 }, { label: "+5k", val: 5000 }, { label: "+10k", val: 10000 }],
+  "filters.minVolume24hUsd": [{ label: "-10k", val: -10000 }, { label: "-5k", val: -5000 }, { label: "+5k", val: 5000 }, { label: "+10k", val: 10000 }],
+  "filters.minTokenAgeHours": [{ label: "-6h", val: -6 }, { label: "-1h", val: -1 }, { label: "+1h", val: 1 }, { label: "+6h", val: 6 }],
+  "filters.maxTopHolderPct": [{ label: "-5%", val: -5 }, { label: "-1%", val: -1 }, { label: "+1%", val: 1 }, { label: "+5%", val: 5 }],
+};
+
+const KEY_BOOLS = new Set([
+  "telegram.notify.onEntry",
+  "telegram.notify.onExit",
+  "telegram.notify.onScreening",
+  "telegram.notify.onError",
+]);
+
+const _hardLockedKeys = new Set([
+  "mode", "confirmLiveTrading", "positionSizeSol", "accountSizeSol",
+  "maxConcurrentPositions", "dailyLossLimitPct",
+]);
+const _hardLockedPrefixes = ["filters.", "sources."];
+
+function _isLocked(key) {
+  return _hardLockedKeys.has(key) || _hardLockedPrefixes.some((p) => key.startsWith(p));
+}
+
 function init(config) {
   _config = config;
   _token = process.env.TELEGRAM_BOT_TOKEN || "";
@@ -364,29 +396,139 @@ async function _handleCallback(cq, chatId, msgId, data) {
     return;
   }
 
-  // settings key selected — show value + edit prompt
+  // settings key selected — show value editor with inline buttons
   if (data.startsWith("settings_key:")) {
     const key = data.replace("settings_key:", "");
     const cfg = config.loadConfig();
     const val = _resolveConfigValue(cfg, key);
-    const prompt =
-      `<b>${key}</b>\n` +
-      `Current value: <code>${JSON.stringify(val)}</code>\n\n` +
-      `Reply with:\n<code>/set ${key} &lt;new-value&gt;</code>`;
+    const catKey = Object.entries(SETTINGS_CATEGORIES).find(([, v]) => v.keys.includes(key))?.[0] || "trading";
+
+    if (_isLocked(key)) {
+      await _call("editMessageText", {
+        chat_id: chatId,
+        message_id: msgId,
+        text: `<b>${key}</b>\nCurrent: <code>${JSON.stringify(val)}</code>\n\n🔒 Locked — edit on server`,
+        parse_mode: "HTML",
+        reply_markup: {
+          inline_keyboard: [[{ text: "🔙 Back", callback_data: `settings_back:${catKey}` }]],
+        },
+      });
+    } else {
+      const kb = _buildValueKeyboard(key, val, catKey);
+      await _call("editMessageText", {
+        chat_id: chatId,
+        message_id: msgId,
+        text: `<b>${key}</b>\nCurrent: <code>${JSON.stringify(val)}</code>`,
+        parse_mode: "HTML",
+        reply_markup: { inline_keyboard: kb },
+      });
+    }
+    await _call("answerCallbackQuery", {
+      callback_query_id: cq.id,
+      text: `Editing ${key.split(".").pop()}`,
+      show_alert: false,
+    });
+    return;
+  }
+
+  // settings value adjustment + apply
+  if (data.startsWith("settings_val:")) {
+    const payload = data.replace("settings_val:", "");
+    const [key, rawDelta] = payload.split("|");
+    const delta = parseFloat(rawDelta);
+    const cfg = config.loadConfig();
+    const current = _resolveConfigValue(cfg, key);
+    const newVal = typeof current === "number" ? current + delta : delta;
+    const catKey = Object.entries(SETTINGS_CATEGORIES).find(([, v]) => v.keys.includes(key))?.[0] || "trading";
+
+    const validationError = _validateConfigValue(key, newVal);
+    if (validationError) {
+      await _call("answerCallbackQuery", {
+        callback_query_id: cq.id,
+        text: `❌ ${validationError}`,
+        show_alert: true,
+      });
+      return;
+    }
+
+    try {
+      config.setConfigValue(key, String(newVal));
+      await _call("answerCallbackQuery", {
+        callback_query_id: cq.id,
+        text: `✅ ${key.split(".").pop()} → ${newVal}`,
+        show_alert: false,
+      });
+      // refresh key view with updated value
+      const updatedCfg = config.loadConfig();
+      const updatedVal = _resolveConfigValue(updatedCfg, key);
+      const kb = _buildValueKeyboard(key, updatedVal, catKey);
+      await _call("editMessageText", {
+        chat_id: chatId,
+        message_id: msgId,
+        text: `<b>${key}</b>\nCurrent: <code>${JSON.stringify(updatedVal)}</code>`,
+        parse_mode: "HTML",
+        reply_markup: { inline_keyboard: kb },
+      });
+    } catch (err) {
+      await _call("answerCallbackQuery", {
+        callback_query_id: cq.id,
+        text: `❌ ${err.message}`,
+        show_alert: true,
+      });
+    }
+    return;
+  }
+
+  // settings boolean toggle (for notify keys)
+  if (data.startsWith("settings_bool:")) {
+    const key = data.replace("settings_bool:", "");
+    const cfg = config.loadConfig();
+    const current = _resolveConfigValue(cfg, key);
+    const newVal = current === true ? "false" : "true";
+    const catKey = Object.entries(SETTINGS_CATEGORIES).find(([, v]) => v.keys.includes(key))?.[0] || "notify";
+    try {
+      config.setConfigValue(key, newVal);
+      await _call("answerCallbackQuery", {
+        callback_query_id: cq.id,
+        text: `✅ ${key.split(".").pop()} → ${newVal === "true" ? "ON" : "OFF"}`,
+        show_alert: false,
+      });
+      const updatedCfg = config.loadConfig();
+      const updatedVal = _resolveConfigValue(updatedCfg, key);
+      const kb = _buildValueKeyboard(key, updatedVal, catKey);
+      await _call("editMessageText", {
+        chat_id: chatId,
+        message_id: msgId,
+        text: `<b>${key}</b>\nCurrent: <code>${JSON.stringify(updatedVal)}</code>`,
+        parse_mode: "HTML",
+        reply_markup: { inline_keyboard: kb },
+      });
+    } catch (err) {
+      await _call("answerCallbackQuery", {
+        callback_query_id: cq.id,
+        text: `❌ ${err.message}`,
+        show_alert: true,
+      });
+    }
+    return;
+  }
+
+  // settings manual entry prompt
+  if (data.startsWith("settings_manual:")) {
+    const key = data.replace("settings_manual:", "");
+    const catKey = Object.entries(SETTINGS_CATEGORIES).find(([, v]) => v.keys.includes(key))?.[0] || "trading";
     await _call("editMessageText", {
       chat_id: chatId,
       message_id: msgId,
-      text: prompt,
+      text: `<b>${key}</b>\nReply with:\n<code>/set ${key} &lt;value&gt;</code>`,
       parse_mode: "HTML",
       reply_markup: {
-        inline_keyboard: [
-          [{ text: "🔙 Back", callback_data: `settings_back:${key.split(".")[0]}` }],
-        ],
+        inline_keyboard: [[{ text: "🔙 Back", callback_data: `settings_back:${catKey}` }]],
       },
     });
     await _call("answerCallbackQuery", {
       callback_query_id: cq.id,
-      text: `Editing ${key}`,
+      text: "Manual entry",
       show_alert: false,
     });
     return;
@@ -473,6 +615,61 @@ function _buildSettingsKeysKeyboard(category) {
   });
   rows.push([{ text: "🔙 Categories", callback_data: "settings_main" }]);
   return rows;
+}
+
+function _buildValueKeyboard(key, currentVal, catKey) {
+  const rows = [];
+
+  // boolean keys
+  if (KEY_BOOLS.has(key)) {
+    rows.push([
+      { text: currentVal === true ? "✅ ON" : "⬜ ON", callback_data: `settings_bool:${key}` },
+      { text: currentVal === false ? "✅ OFF" : "⬜ OFF", callback_data: `settings_bool:${key}` },
+    ]);
+    rows.push([{ text: "🔙 Back", callback_data: `settings_back:${catKey}` }]);
+    return rows;
+  }
+
+  // numeric keys with preset adjustments
+  const adjustments = KEY_ADJUSTMENTS[key];
+  if (adjustments && typeof currentVal === "number") {
+    let row = [];
+    for (const adj of adjustments) {
+      row.push({ text: `${adj.label}`, callback_data: `settings_val:${key}|${adj.val}` });
+      if (row.length === 4) {
+        rows.push(row);
+        row = [];
+      }
+    }
+    if (row.length > 0) rows.push(row);
+    // manual input option
+    rows.push([{ text: "✏️ Manual", callback_data: `settings_manual:${key}` }]);
+    rows.push([{ text: "🔙 Back", callback_data: `settings_back:${catKey}` }]);
+    return rows;
+  }
+
+  // fallback — manual entry only
+  rows.push([{ text: "✏️ Use /set", callback_data: `settings_manual:${key}` }]);
+  rows.push([{ text: "🔙 Back", callback_data: `settings_back:${catKey}` }]);
+  return rows;
+}
+
+function _validateConfigValue(key, val) {
+  if (typeof val !== "number") return null;
+  const rules = {
+    takeProfitPct: { min: 1, max: 200, label: "TP must be 1–200%" },
+    stopLossPct: { min: -50, max: -1, label: "SL must be -1 to -50%" },
+    positionSizeSol: { min: 0.001, max: 100, label: "Size must be 0.001–100 SOL" },
+    maxHoldHours: { min: 1, max: 168, label: "Max Hold must be 1–168h" },
+    maxConcurrentPositions: { min: 1, max: 20, label: "Concurrent must be 1–20" },
+    dailyLossLimitPct: { min: -100, max: -1, label: "Loss limit must be -1 to -100%" },
+    cooldownMinutesBetweenTrades: { min: 0, max: 1440, label: "Cooldown must be 0–1440m" },
+  };
+  const rule = rules[key];
+  if (rule) {
+    if (val < rule.min || val > rule.max) return rule.label;
+  }
+  return null;
 }
 
 // ——— command handler ———
@@ -631,15 +828,15 @@ async function _handleCommand(text, chatId) {
       if (args.length < 2) return { text: "Usage: /set &lt;key&gt; &lt;value&gt;" };
       const key = args[0];
       const val = args.slice(1).join(" ");
-      const _hardLockedKeys = [
-        "mode", "confirmLiveTrading", "positionSizeSol", "accountSizeSol",
-        "maxConcurrentPositions", "dailyLossLimitPct",
-      ];
-      const _hardLockedPrefixes = ["filters.", "sources."];
-      if (_hardLockedKeys.includes(key) || _hardLockedPrefixes.some((p) => key.startsWith(p))) {
+      if (_isLocked(key)) {
         return { text: `🔒 <code>${key}</code> locked for safety — edit on server` };
       }
       try {
+        const parsed = parseFloat(val);
+        if (!isNaN(parsed)) {
+          const err = _validateConfigValue(key, parsed);
+          if (err) return { text: `❌ ${err}` };
+        }
         const result = config.setConfigValue(key, val);
         return { text: `<code>${key}</code> → ${JSON.stringify(result)}` };
       } catch (err) {
