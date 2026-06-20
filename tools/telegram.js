@@ -75,6 +75,8 @@ async function _call(method, payload) {
     return res.data;
   } catch (err) {
     const msg = err.response?.data?.description || err.message;
+    // "not modified" is harmless — ignore silently
+    if (msg.includes("message is not modified")) return { ok: true };
     console.log(`telegram ${method}: ${msg}`);
     return null;
   }
@@ -303,9 +305,10 @@ async function pollCommands() {
 
       let cmdText = msg.text.trim();
       const normalized = cmdText.toLowerCase().replace(/\ufe0f/g, "");
-      if (_buttonRoutes[normalized]) {
-        cmdText = _buttonRoutes[normalized];
-      }
+      const routeKey = Object.keys(_buttonRoutes).find((k) =>
+        k.toLowerCase().replace(/\ufe0f/g, "") === normalized
+      );
+      if (routeKey) cmdText = _buttonRoutes[routeKey];
 
       const reply = await _handleCommand(cmdText, msg.chat.id);
       if (reply) {
