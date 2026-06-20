@@ -211,27 +211,15 @@ async function runLoop() {
           const currentPrice = await jupiter.getUsdPrice(pickMint);
 
           if (currentPrice != null) {
-            const candidateData = result.ranked
-              .filter((r) => r.mint === pickMint)
-              .map((r) => ({
-                mint: r.mint,
-                symbol: r.symbol,
-              }))[0];
             const newPos = positions.openPosition(
-              candidateData || { mint: pickMint, symbol: pickMint.slice(0, 8) },
+              pickCandidate || { mint: pickMint, symbol: pickMint.slice(0, 8) },
               currentPrice,
               cfg
             );
             if (newPos) {
               riskManager.recordTradeOpened(riskState);
-              // attach candidate fields for richer notification
-              if (pickCandidate) {
-                newPos.liquidityUsd = pickCandidate.candidate?.liquidityUsd;
-                newPos.volume24hUsd = pickCandidate.candidate?.volume24hUsd;
-                newPos.feeConfirm = pickCandidate.feeConfirm;
-                newPos._regime = regime.regime;
-                newPos._timing = pickCandidate.timing || {};
-              }
+              // attach remaining runtime fields not on candidate
+              newPos._regime = regime.regime;
               telegram.notifyEntry(newPos);
             }
           } else {

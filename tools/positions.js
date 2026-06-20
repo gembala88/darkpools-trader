@@ -73,11 +73,30 @@ function openPosition(candidate, currentPrice, config) {
     status: "open",
     exits: [],
     realizedPnlSol: 0,
+    entryRsi: candidate.timing?.indicators?.rsi ?? null,
+    entryEmaFast: candidate.timing?.indicators?.emaFast ?? null,
+    entryEmaSlow: candidate.timing?.indicators?.emaSlow ?? null,
+    entryPrice1h: candidate.feeConfirm?.price1h ?? null,
+    entryPrice24h: candidate.feeConfirm?.price24h ?? null,
+    entryLiquidityUsd: candidate.candidate?.liquidityUsd ?? candidate.liquidityUsd ?? null,
+    entryVolume24hUsd: candidate.candidate?.volume24hUsd ?? candidate.volume24hUsd ?? null,
+    entryRunup1hPct: candidate.feeConfirm?.price1h ? ((currentPrice / candidate.feeConfirm.price1h - 1) * 100) : null,
+    entryRunup24hPct: candidate.feeConfirm?.price24h ? ((currentPrice / candidate.feeConfirm.price24h - 1) * 100) : null,
+    // fields used downstream (notifyEntry, notifications)
+    liquidityUsd: candidate.candidate?.liquidityUsd ?? candidate.liquidityUsd ?? null,
+    volume24hUsd: candidate.candidate?.volume24hUsd ?? candidate.volume24hUsd ?? null,
+    feeConfirm: candidate.feeConfirm ?? null,
+    _timing: candidate.timing ?? null,
   };
 
   console.log(
     `SIMULATED BUY ${pos.symbol} @ ${effectivePrice.toFixed(8)} (quoted ${currentPrice.toFixed(8)}, slip ${slipPct}%)`
   );
+  if (pos.entryRunup1hPct != null || pos.entryRsi != null) {
+    console.log(
+      `entry-context ${pos.symbol}: runup1h ${pos.entryRunup1hPct != null ? pos.entryRunup1hPct.toFixed(2) + "%" : "?"} rsi ${pos.entryRsi ?? "?"}`
+    );
+  }
 
   const all = _loadAll();
   all.push(pos);
