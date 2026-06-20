@@ -27,6 +27,7 @@
     "report": "node index.js report",
     "report:test": "node tools/reporter.js --test",
     "healthcheck": "node scripts/healthcheck.js",
+    "verify:dryrun": "node scripts/verify-dryrun.js",
     "scam:test": "node tools/filters/scam.js --test",
     "gmgn:test": "node tools/signals/gmgn.js --test",
     "feeconfirm:test": "node tools/signals/gmgn.js --test",
