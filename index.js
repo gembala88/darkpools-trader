@@ -70,7 +70,7 @@ async function monitorPositions(cfg) {
 
     if (reason) {
       if (reason.type === "partialTP") {
-        positions.partialClose(pos, cfg.execution.partialTpSellPct, reason, currentPrice, cfg);
+        await positions.partialClose(pos, cfg.execution.partialTpSellPct, reason, currentPrice, cfg);
         const exitPnl = pos.exits[pos.exits.length - 1].pnlSol;
         const riskState = riskManager.loadState();
         riskManager.recordTradeClosed(riskState, exitPnl, false, cfg);
@@ -80,7 +80,7 @@ async function monitorPositions(cfg) {
         }
       } else {
         const posTotalPnl = pos.realizedPnlSol;
-        positions.closeRemaining(pos, reason, currentPrice, cfg);
+        await positions.closeRemaining(pos, reason, currentPrice, cfg);
         const finalPnl = pos.realizedPnlSol;
         const riskState = riskManager.loadState();
         riskManager.recordTradeClosed(riskState, finalPnl - posTotalPnl, true, cfg);
@@ -228,7 +228,7 @@ async function runLoop() {
           const currentPrice = await jupiter.getUsdPrice(pickMint);
 
           if (currentPrice != null) {
-            const newPos = positions.openPosition(
+            const newPos = await positions.openPosition(
               pickCandidate || { mint: pickMint, symbol: pickMint.slice(0, 8) },
               currentPrice,
               cfg
