@@ -6,6 +6,35 @@ const riskManager = require("./tools/riskManager");
 const telegram = require("./tools/telegram");
 const jupiter = require("./tools/signals/jupiter");
 const { assessRegime } = require("./tools/filters/regime");
+const http = require("http");
+
+// optional health HTTP server (enabled via HEALTH_PORT env var)
+const HEALTH_PORT = process.env.HEALTH_PORT ? parseInt(process.env.HEALTH_PORT, 10) : 0;
+if (HEALTH_PORT > 0) {
+  const server = http.createServer((req, res) => {
+    if (req.url === "/health" || req.url === "/") {
+      const state = riskManager.loadState();
+      const openPositions = positions.loadOpenPositions();
+      const body = JSON.stringify({
+        status: "ok",
+        uptime: process.uptime(),
+        mode: cfg?.mode || "unknown",
+        killSwitch: state?.killSwitch || false,
+        openPositions: openPositions.length,
+        tradesToday: state?.tradesToday || 0,
+        pnlTodaySol: state?.realizedPnlTodaySol || 0,
+      });
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(body);
+    } else {
+      res.writeHead(404);
+      res.end("not found");
+    }
+  });
+  server.listen(HEALTH_PORT, "127.0.0.1", () => {
+    console.log(`health HTTP server on 127.0.0.1:${HEALTH_PORT}`);
+  });
+}
 
 let cfg = loadConfig();
 

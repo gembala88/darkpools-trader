@@ -6,6 +6,12 @@
   "type": "commonjs",
   "scripts": {
     "start": "node index.js",
+    "pm2:start": "pm2 start ecosystem.config.js",
+    "pm2:stop": "pm2 stop darkpools-trader",
+    "pm2:restart": "pm2 restart darkpools-trader",
+    "pm2:status": "pm2 status darkpools-trader",
+    "pm2:logs": "pm2 logs darkpools-trader",
+    "pm2:monit": "pm2 monit",
     "config:check": "node -e \"require('./config').loadConfig(); console.log('config OK')\"",
     "scan": "node index.js scan",
     "bot": "node index.js run",

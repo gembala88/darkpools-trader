@@ -217,6 +217,22 @@ section("6. EXTERNAL DEPS (network)");
     warn("Helius RPC — SOLANA_RPC_URL not set, skipping");
   }
 
+  // PM2 health endpoint (if running)
+  const healthPort = process.env.HEALTH_PORT || 0;
+  if (healthPort > 0) {
+    try {
+      const r = await axios.get(`http://127.0.0.1:${healthPort}/health`, { timeout: 5000 });
+      if (r.status === 200 && r.data?.status === "ok") {
+        pass(`PM2 health endpoint OK (port ${healthPort})`);
+        console.log(`       mode=${r.data.mode} open=${r.data.openPositions} tradesToday=${r.data.tradesToday} pnl=${r.data.pnlTodaySol}`);
+      } else {
+        warn("PM2 health endpoint responded", JSON.stringify(r.data));
+      }
+    } catch (err) {
+      warn("PM2 health endpoint unreachable", err.message);
+    }
+  }
+
   // ── 7. STATIC SANITY ──
   section("7. STATIC SANITY (node --check)");
 
