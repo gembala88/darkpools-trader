@@ -25,7 +25,8 @@
     "gmgn:test": "node tools/signals/gmgn.js --test",
     "feeconfirm:test": "node tools/signals/gmgn.js --test",
     "regime:test": "node tools/filters/regime.js --test",
-    "set": "node scripts/setconfig.js"
+    "set": "node scripts/setconfig.js",
+    "analyze": "node scripts/analyze.js"
   },
   "dependencies": {
     "dotenv": "^16.4.7",
