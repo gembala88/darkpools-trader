@@ -45,48 +45,57 @@ if (process.argv.includes("config:set")) {
 
 async function monitorPositions(cfg) {
   const openPositions = positions.loadOpenPositions();
+  if (openPositions.length === 0) return;
 
-  for (let i = openPositions.length - 1; i >= 0; i--) {
+  const prices = await Promise.allSettled(
+    openPositions.map((p) => jupiter.getUsdPrice(p.mint))
+  );
+
+  for (let i = 0; i < openPositions.length; i++) {
     const pos = openPositions[i];
     if (pos.status === "closed") continue;
 
-    let currentPrice = await jupiter.getUsdPrice(pos.mint);
+    const priceResult = prices[i];
+    let currentPrice;
 
-    if (currentPrice != null) {
-      const reason = positions.evaluateExit(pos, currentPrice, null, cfg);
-      positions.savePosition(pos);
+    if (priceResult.status === "fulfilled" && priceResult.value != null) {
+      currentPrice = priceResult.value;
+    } else {
+      console.log(`monitor: no price for ${pos.symbol} — skip this tick`);
+      continue;
+    }
 
-      if (reason) {
-        if (reason.type === "partialTP") {
-          positions.partialClose(pos, cfg.execution.partialTpSellPct, reason, currentPrice, cfg);
-          const exitPnl = pos.exits[pos.exits.length - 1].pnlSol;
-          const riskState = riskManager.loadState();
-          riskManager.recordTradeClosed(riskState, exitPnl, false, cfg);
-          telegram.notifyExit(pos, pos.exits[pos.exits.length - 1], false);
-          if (pos.status === "closed") {
-            console.log(`Position ${pos.symbol} fully closed`);
-          }
-        } else {
-          const posTotalPnl = pos.realizedPnlSol;
-          positions.closeRemaining(pos, reason, currentPrice, cfg);
-          const finalPnl = pos.realizedPnlSol;
-          const riskState = riskManager.loadState();
-          riskManager.recordTradeClosed(riskState, finalPnl - posTotalPnl, true, cfg);
-          const lastExit = pos.exits[pos.exits.length - 1];
-          telegram.notifyExit(pos, lastExit, true);
+    const reason = positions.evaluateExit(pos, currentPrice, null, cfg);
+    positions.savePosition(pos);
+
+    if (reason) {
+      if (reason.type === "partialTP") {
+        positions.partialClose(pos, cfg.execution.partialTpSellPct, reason, currentPrice, cfg);
+        const exitPnl = pos.exits[pos.exits.length - 1].pnlSol;
+        const riskState = riskManager.loadState();
+        riskManager.recordTradeClosed(riskState, exitPnl, false, cfg);
+        telegram.notifyExit(pos, pos.exits[pos.exits.length - 1], false);
+        if (pos.status === "closed") {
           console.log(`Position ${pos.symbol} fully closed`);
         }
       } else {
-        const cache = _posLogCache[pos.mint] || {};
-        const pStr = currentPrice.toFixed(8);
-        const pkStr = pos.peakPrice.toFixed(8);
-        if (pStr !== cache.lastPrice || pkStr !== cache.lastPeak) {
-          console.log(`monitor ${pos.symbol}: $${pStr} peak $${pkStr}`);
-          _posLogCache[pos.mint] = { lastPrice: pStr, lastPeak: pkStr };
-        }
+        const posTotalPnl = pos.realizedPnlSol;
+        positions.closeRemaining(pos, reason, currentPrice, cfg);
+        const finalPnl = pos.realizedPnlSol;
+        const riskState = riskManager.loadState();
+        riskManager.recordTradeClosed(riskState, finalPnl - posTotalPnl, true, cfg);
+        const lastExit = pos.exits[pos.exits.length - 1];
+        telegram.notifyExit(pos, lastExit, true);
+        console.log(`Position ${pos.symbol} fully closed`);
       }
     } else {
-      console.log(`monitor: no price for ${pos.symbol} — will retry`);
+      const cache = _posLogCache[pos.mint] || {};
+      const pStr = currentPrice.toFixed(8);
+      const pkStr = pos.peakPrice.toFixed(8);
+      if (pStr !== cache.lastPrice || pkStr !== cache.lastPeak) {
+        console.log(`monitor ${pos.symbol}: $${pStr} peak $${pkStr}`);
+        _posLogCache[pos.mint] = { lastPrice: pStr, lastPeak: pkStr };
+      }
     }
   }
 }
@@ -112,13 +121,21 @@ async function runLoop() {
   // start independent position monitor timer (ALWAYS runs, even when scan is stuck on 429)
   let _monitoring = false;
   const monitorIntervalMs = cfg.execution?.monitorIntervalMs || 10000;
+  const _timeout = (ms) => new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), ms));
   setInterval(async () => {
     if (_monitoring) return;
     _monitoring = true;
     try {
-      await monitorPositions(cfg);
+      await Promise.race([
+        monitorPositions(cfg),
+        _timeout(15000),
+      ]);
     } catch (e) {
-      console.log("monitor error:", e.message);
+      if (e.message === "timeout") {
+        console.log("monitor run timed out");
+      } else {
+        console.log("monitor error:", e.message);
+      }
     } finally {
       _monitoring = false;
     }
