@@ -30,25 +30,6 @@ async function scan(config) {
 
   const safeCount = passedCandidates.length;
 
-  // timing: fetch candles + run strategy for each safe candidate
-  const tfConfig = config.strategy.trendFollowing;
-  const strat = strategy.getActiveStrategy(config);
-  const withTiming = [];
-
-  for (const item of passedCandidates) {
-    const c = item.candidate;
-    let candleData = [];
-    if (config.sources.geckoterminalOhlc?.enabled && c.pairAddress) {
-      try {
-        candleData = await candles.getCandles(c, tfConfig);
-      } catch (err) {
-        console.log(`candles error for ${c.mint}: ${err.message}`);
-      }
-    }
-    const timing = strat.evaluate(c, candleData, tfConfig);
-    withTiming.push({ ...item, timing });
-  }
-
   // deterministic scoring within batch
   function median(arr) {
     const sorted = [...arr].sort((a, b) => a - b);
@@ -56,13 +37,13 @@ async function scan(config) {
     return sorted.length % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
   }
 
-  const liqValues = withTiming.map((p) => p.candidate.liquidityUsd || 0);
-  const volValues = withTiming.map((p) => p.candidate.volume24hUsd || 0);
+  const liqValues = passedCandidates.map((p) => p.candidate.liquidityUsd || 0);
+  const volValues = passedCandidates.map((p) => p.candidate.volume24hUsd || 0);
   const medianLiq = median(liqValues) || 1;
   const medianVol = median(volValues) || 1;
   const minAge = config.filters?.minTokenAgeHours || 1;
 
-  const withScores = await Promise.all(withTiming.map(async (item) => {
+  const withScores = await Promise.all(passedCandidates.map(async (item) => {
     const c = item.candidate;
     const w = config.scoring;
 
@@ -102,7 +83,7 @@ async function scan(config) {
       candidate: c,
       score: parseFloat(score.toFixed(4)),
       checks: item.checks,
-      timing: item.timing,
+      timing: null,
       feeConfirm,
     };
   }));
@@ -110,6 +91,22 @@ async function scan(config) {
   withScores.sort((a, b) => b.score - a.score);
   const topN = config.scoring.topN || 10;
   const ranked = withScores.slice(0, topN);
+
+  // timing: fetch candles + run strategy only for top N (not all safe candidates)
+  const tfConfig = config.strategy.trendFollowing;
+  const strat = strategy.getActiveStrategy(config);
+  for (const r of ranked) {
+    const c = r.candidate;
+    let candleData = [];
+    if (config.sources.geckoterminalOhlc?.enabled && c.pairAddress) {
+      try {
+        candleData = await candles.getCandles(c, tfConfig);
+      } catch (err) {
+        console.log(`candles error for ${c.mint}: ${err.message}`);
+      }
+    }
+    r.timing = strat.evaluate(c, candleData, tfConfig);
+  }
 
   // LLM decision
   const decision = await agent.decide(ranked, config);
