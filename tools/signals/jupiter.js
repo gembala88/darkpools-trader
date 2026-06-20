@@ -1,6 +1,7 @@
 const axios = require("axios");
 
 const _priceCache = {};
+const CACHE_TTL_MS = 30000; // 30 seconds
 
 function _getBaseUrl() {
   return process.env.JUPITER_API_KEY
@@ -13,10 +14,17 @@ function _getHeaders() {
   return apiKey ? { "x-api-key": apiKey } : {};
 }
 
-async function getUsdPrice(mint) {
-  if (_priceCache[mint] && _priceCache[mint].priceUsd != null) {
-    return _priceCache[mint].priceUsd;
+function _cached(mint) {
+  const entry = _priceCache[mint];
+  if (entry && entry.priceUsd != null && Date.now() - entry.ts < CACHE_TTL_MS) {
+    return entry.priceUsd;
   }
+  return null;
+}
+
+async function getUsdPrice(mint) {
+  const cached = _cached(mint);
+  if (cached != null) return cached;
 
   try {
     const res = await axios.get(_getBaseUrl(), {
@@ -27,15 +35,15 @@ async function getUsdPrice(mint) {
     const entry = res.data?.[mint];
     if (entry && entry.usdPrice != null) {
       const price = parseFloat(entry.usdPrice);
-      _priceCache[mint] = { priceUsd: price, id: entry.id || null };
+      _priceCache[mint] = { priceUsd: price, id: entry.id || null, ts: Date.now() };
       return price;
     }
-    _priceCache[mint] = { priceUsd: null, id: null };
+    _priceCache[mint] = { priceUsd: null, id: null, ts: Date.now() };
     return null;
   } catch (err) {
     const status = err.response?.status || "";
     console.log(`jupiter price fetch failed for ${mint}: ${status} ${err.message}`);
-    _priceCache[mint] = { priceUsd: null, id: null };
+    _priceCache[mint] = { priceUsd: null, id: null, ts: Date.now() };
     return null;
   }
 }
@@ -47,7 +55,7 @@ async function enrichPrices(candidates) {
 
   if (mints.length === 0) return candidates;
 
-  const uncached = mints.filter((m) => _priceCache[m] == null);
+  const uncached = mints.filter((m) => _cached(m) == null);
 
   if (uncached.length > 0) {
     const batchSize = 50;
@@ -65,8 +73,8 @@ async function enrichPrices(candidates) {
           for (const mint of batch) {
             const entry = data[mint];
             _priceCache[mint] = entry
-              ? { priceUsd: parseFloat(entry.usdPrice) || null, id: entry.id || null }
-              : { priceUsd: null, id: null };
+              ? { priceUsd: parseFloat(entry.usdPrice) || null, id: entry.id || null, ts: Date.now() }
+              : { priceUsd: null, id: null, ts: Date.now() };
           }
         }
       } catch (err) {
@@ -76,11 +84,16 @@ async function enrichPrices(candidates) {
   }
 
   return candidates.map((c) => {
-    if (_priceCache[c.mint] && _priceCache[c.mint].priceUsd != null) {
-      c.priceUsd = _priceCache[c.mint].priceUsd;
+    const cached = _cached(c.mint);
+    if (cached != null) {
+      c.priceUsd = cached;
     }
     return c;
   });
 }
 
-module.exports = { enrichPrices, getUsdPrice };
+function clearCache() {
+  Object.keys(_priceCache).forEach((k) => delete _priceCache[k]);
+}
+
+module.exports = { enrichPrices, getUsdPrice, clearCache };
