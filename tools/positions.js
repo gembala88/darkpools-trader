@@ -347,6 +347,21 @@ if (require.main === module && process.argv.includes("--test")) {
   closeRemaining(found, slReason, 0.85, config);
   assert("restart: status closed after SL", found.status === "closed");
 
+  // 11. Monitor standalone: open → save → reload → TP fires (simulates monitorPositions flow)
+  const posM = openPosition({ mint: "MonitorToken", symbol: "MON" }, 1.0, config);
+  assert("monitor: position opened", posM !== null && posM.status === "open");
+  savePosition(posM);
+  // reload (simulate monitor reload from file)
+  const monReloaded = loadOpenPositions();
+  const monFound = monReloaded.find((p) => p.mint === "MonitorToken");
+  assert("monitor: found after reload", monFound !== undefined);
+  // price rises to TP level
+  const tpR = evaluateExit(monFound, 1.30, null, config);
+  assert("monitor: TP triggered on reloaded position", tpR !== null && tpR.type === "partialTP");
+  partialClose(monFound, config.execution.partialTpSellPct, tpR, 1.30, config);
+  assert("monitor: remaining after partial TP", monFound.remainingPct === 50);
+  assert("monitor: partialTpDone true", monFound.partialTpDone === true);
+
   fs.writeFileSync(testFile, "[]");
 
   clean();

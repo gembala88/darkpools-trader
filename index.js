@@ -9,6 +9,9 @@ const { assessRegime } = require("./tools/filters/regime");
 
 let cfg = loadConfig();
 
+// per-position log suppression (shared between monitor and scan)
+const _posLogCache = {}; // mint -> { lastPrice, lastPeak }
+
 // one-shot commands
 if (process.argv.includes("stop")) {
   riskManager.setKillSwitch(true);
@@ -40,13 +43,61 @@ if (process.argv.includes("config:set")) {
   process.exit(0);
 }
 
+async function monitorPositions(cfg) {
+  const openPositions = positions.loadOpenPositions();
+
+  for (let i = openPositions.length - 1; i >= 0; i--) {
+    const pos = openPositions[i];
+    if (pos.status === "closed") continue;
+
+    let currentPrice = await jupiter.getUsdPrice(pos.mint);
+
+    if (currentPrice != null) {
+      const reason = positions.evaluateExit(pos, currentPrice, null, cfg);
+      positions.savePosition(pos);
+
+      if (reason) {
+        if (reason.type === "partialTP") {
+          positions.partialClose(pos, cfg.execution.partialTpSellPct, reason, currentPrice, cfg);
+          const exitPnl = pos.exits[pos.exits.length - 1].pnlSol;
+          const riskState = riskManager.loadState();
+          riskManager.recordTradeClosed(riskState, exitPnl, false, cfg);
+          telegram.notifyExit(pos, pos.exits[pos.exits.length - 1], false);
+          if (pos.status === "closed") {
+            console.log(`Position ${pos.symbol} fully closed`);
+          }
+        } else {
+          const posTotalPnl = pos.realizedPnlSol;
+          positions.closeRemaining(pos, reason, currentPrice, cfg);
+          const finalPnl = pos.realizedPnlSol;
+          const riskState = riskManager.loadState();
+          riskManager.recordTradeClosed(riskState, finalPnl - posTotalPnl, true, cfg);
+          const lastExit = pos.exits[pos.exits.length - 1];
+          telegram.notifyExit(pos, lastExit, true);
+          console.log(`Position ${pos.symbol} fully closed`);
+        }
+      } else {
+        const cache = _posLogCache[pos.mint] || {};
+        const pStr = currentPrice.toFixed(8);
+        const pkStr = pos.peakPrice.toFixed(8);
+        if (pStr !== cache.lastPrice || pkStr !== cache.lastPeak) {
+          console.log(`monitor ${pos.symbol}: $${pStr} peak $${pkStr}`);
+          _posLogCache[pos.mint] = { lastPrice: pStr, lastPeak: pkStr };
+        }
+      }
+    } else {
+      console.log(`monitor: no price for ${pos.symbol} — will retry`);
+    }
+  }
+}
+
 async function runLoop() {
   telegram.init(cfg);
   await telegram.notifyStart();
 
   console.log("darkpools-trader | mode:", cfg.mode, "| starting dry_run loop");
 
-  let openPositions = positions.loadOpenPositions();
+  const openPositions = positions.loadOpenPositions();
   if (openPositions.length > 0) {
     console.log(`resumed ${openPositions.length} open position(s)`);
   }
@@ -58,9 +109,22 @@ async function runLoop() {
     telegram.pollCommands().catch((e) => console.log("telegram poll error:", e.message));
   }, pollIntervalMs);
 
+  // start independent position monitor timer (ALWAYS runs, even when scan is stuck on 429)
+  let _monitoring = false;
+  const monitorIntervalMs = cfg.execution?.monitorIntervalMs || 10000;
+  setInterval(async () => {
+    if (_monitoring) return;
+    _monitoring = true;
+    try {
+      await monitorPositions(cfg);
+    } catch (e) {
+      console.log("monitor error:", e.message);
+    } finally {
+      _monitoring = false;
+    }
+  }, monitorIntervalMs);
+
   let lastDailyCheckKey = null;
-  // per-position log suppression
-  const _posLogCache = {}; // mint -> { lastPrice, lastPeak }
 
   process.on("SIGINT", () => {
     console.log("\nSIGINT received — state saved, exiting cleanly");
@@ -89,62 +153,10 @@ async function runLoop() {
     }
     loopScanMs = cfg.execution?.loopScanMs || 60000;
 
-    // re-sync monitored positions from file each tick (positions opened in prior
-    // sessions or by other processes are picked up here)
-    openPositions = positions.loadOpenPositions();
-
-    // monitor ALL open positions (ALWAYS allowed, regardless of gate/kill switch)
+    // scan for entry if under max concurrent (reads open count fresh from file)
+    const openCount = positions.loadOpenPositions().length;
     const maxConc = cfg.maxConcurrentPositions || 3;
-    for (let i = openPositions.length - 1; i >= 0; i--) {
-      const pos = openPositions[i];
-      if (pos.status === "closed") {
-        openPositions.splice(i, 1);
-        continue;
-      }
-      let currentPrice = await jupiter.getUsdPrice(pos.mint);
-
-      if (currentPrice != null) {
-        const reason = positions.evaluateExit(pos, currentPrice, null, cfg);
-        positions.savePosition(pos);
-
-        if (reason) {
-          if (reason.type === "partialTP") {
-            positions.partialClose(pos, cfg.execution.partialTpSellPct, reason, currentPrice, cfg);
-            const exitPnl = pos.exits[pos.exits.length - 1].pnlSol;
-            const riskState = riskManager.loadState();
-            riskManager.recordTradeClosed(riskState, exitPnl, false, cfg);
-            telegram.notifyExit(pos, pos.exits[pos.exits.length - 1], false);
-            if (pos.status === "closed") {
-              openPositions.splice(i, 1);
-              console.log(`Position ${pos.symbol} fully closed`);
-            }
-          } else {
-            const posTotalPnl = pos.realizedPnlSol;
-            positions.closeRemaining(pos, reason, currentPrice, cfg);
-            const finalPnl = pos.realizedPnlSol;
-            const riskState = riskManager.loadState();
-            riskManager.recordTradeClosed(riskState, finalPnl - posTotalPnl, true, cfg);
-            const lastExit = pos.exits[pos.exits.length - 1];
-            telegram.notifyExit(pos, lastExit, true);
-            openPositions.splice(i, 1);
-            console.log(`Position ${pos.symbol} fully closed`);
-          }
-        } else {
-          const cache = _posLogCache[pos.mint] || {};
-          const pStr = currentPrice.toFixed(8);
-          const pkStr = pos.peakPrice.toFixed(8);
-          if (pStr !== cache.lastPrice || pkStr !== cache.lastPeak) {
-            console.log(`monitor ${pos.symbol}: $${pStr} peak $${pkStr}`);
-            _posLogCache[pos.mint] = { lastPrice: pStr, lastPeak: pkStr };
-          }
-        }
-      } else {
-        console.log(`monitor: no price for ${pos.symbol} — will retry`);
-      }
-    }
-
-    // scan for entry if under max concurrent
-    if (openPositions.length < maxConc && now - lastScanTime > loopScanMs) {
+    if (openCount < maxConc && now - lastScanTime > loopScanMs) {
       lastScanTime = now;
       console.log("Scanning for entry...");
 
@@ -174,7 +186,8 @@ async function runLoop() {
 
         let pickMint = null;
         let pickCandidate = null;
-        const heldMints = new Set(openPositions.map((p) => p.mint));
+        const candidates = positions.loadOpenPositions();
+        const heldMints = new Set(candidates.map((p) => p.mint));
 
         if (decision && decision.called && decision.pick) {
           if (!heldMints.has(decision.pick)) {
@@ -210,7 +223,6 @@ async function runLoop() {
               cfg
             );
             if (newPos) {
-              openPositions.push(newPos);
               riskManager.recordTradeOpened(riskState);
               // attach candidate fields for richer notification
               if (pickCandidate) {
