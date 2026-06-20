@@ -14,12 +14,21 @@ let _offset = 0;
 let _lastPinnedMsgId = null;
 let _prevDayKey = null;
 
+// PnL auto-refresh
+let _pnlMessages = {}; // { [chatId]: msgId }
+let _pnlRefreshTimer = null;
+const PNL_REFRESH_MS = 30000;
+
+// settings menu state (per chat)
+const _settingsState = {}; // { [chatId]: { category } }
+
 function init(config) {
   _config = config;
   _token = process.env.TELEGRAM_BOT_TOKEN || "";
   _chatId = process.env.TELEGRAM_CHAT_ID || "";
   _channelId = process.env.TELEGRAM_CHANNEL_ID || "";
   _topicId = process.env.TELEGRAM_TOPIC_ID || "";
+  _startPnlAutoRefresh();
 }
 
 function _isEnabled() {
@@ -38,6 +47,93 @@ async function _call(method, payload) {
     return null;
   }
 }
+
+// ——— PnL auto-refresh ———
+
+function _startPnlAutoRefresh() {
+  if (_pnlRefreshTimer) return;
+  _pnlRefreshTimer = setInterval(async () => {
+    try {
+      await _autoRefreshPnls();
+    } catch (e) {
+      console.log("pnl auto-refresh error:", e.message);
+    }
+  }, PNL_REFRESH_MS);
+}
+
+async function _autoRefreshPnls() {
+  const entries = Object.entries(_pnlMessages);
+  if (entries.length === 0) return;
+  const openPositions = positions.loadOpenPositions();
+  const content = openPositions.length === 0
+    ? { text: "No open positions.", keyboard: [] }
+    : await _buildPnlContent(openPositions);
+
+  for (const [chatId, msgId] of entries) {
+    const payload = {
+      chat_id: Number(chatId),
+      message_id: msgId,
+      text: content.text,
+      parse_mode: "HTML",
+    };
+    if (content.keyboard) {
+      payload.reply_markup = { inline_keyboard: content.keyboard };
+    }
+    const result = await _call("editMessageText", payload);
+    if (!result) {
+      delete _pnlMessages[chatId];
+    }
+  }
+
+  // if all positions closed, stop tracking
+  if (openPositions.length === 0) {
+    _pnlMessages = {};
+  }
+}
+
+function _registerPnlMessage(chatId, msgId) {
+  const key = String(chatId);
+  _pnlMessages[key] = msgId;
+}
+
+async function _buildPnlContent(openPositions) {
+  const lines = ["<b>💰 Live PnL</b>"];
+  let anyPrice = false;
+  for (const p of openPositions) {
+    const held = p.entryTime ? ((Date.now() - p.entryTime) / 3600000).toFixed(1) : "?";
+    let currentPrice;
+    try {
+      currentPrice = await jupiter.getUsdPrice(p.mint);
+    } catch {}
+    if (currentPrice != null) {
+      anyPrice = true;
+      const pnlPct = p.entryPriceEffective
+        ? (((currentPrice - p.entryPriceEffective) / p.entryPriceEffective) * 100).toFixed(2)
+        : "?";
+      const arrow = pnlPct !== "?" && parseFloat(pnlPct) >= 0 ? "🟢" : "🔴";
+      const pnlSol = p.entryPriceEffective
+        ? ((currentPrice - p.entryPriceEffective) * p.qtyTokens).toFixed(6)
+        : "?";
+      lines.push(
+        `${arrow} <b>${escapeHtml(p.symbol)}</b>`,
+        `  Entry $${p.entryPriceEffective.toFixed(8)} → Current $${currentPrice.toFixed(8)}`,
+        `  PnL: ${pnlPct}% · ${pnlSol} SOL · ${held}h`
+      );
+    } else {
+      lines.push(
+        `⚪ <b>${escapeHtml(p.symbol)}</b>`,
+        `  Entry $${(p.entryPriceEffective || 0).toFixed(8)} → Price: ? · ${held}h`
+      );
+    }
+  }
+  if (!anyPrice) lines.push("(no price data)");
+  return {
+    text: lines.join("\n"),
+    keyboard: [[{ text: "🔄 Refresh", callback_data: "refresh_pnl" }]],
+  };
+}
+
+// ——— send message (DM + optional channel mirror) ———
 
 async function send(text, opts) {
   if (!_isEnabled()) return null;
@@ -69,29 +165,17 @@ async function send(text, opts) {
 
 async function pin(chatId, messageId) {
   if (!_isEnabled()) return;
-  // unpin previous
-  if (_lastPinnedMsgId) {
-    await unpin(chatId, _lastPinnedMsgId);
-  }
-  await _call("pinChatMessage", {
-    chat_id: chatId,
-    message_id: messageId,
-  });
+  if (_lastPinnedMsgId) await unpin(chatId, _lastPinnedMsgId);
+  await _call("pinChatMessage", { chat_id: chatId, message_id: messageId });
   _lastPinnedMsgId = messageId;
 }
 
 async function unpin(chatId, messageId) {
-  await _call("unpinChatMessage", {
-    chat_id: chatId,
-    message_id: messageId,
-  });
+  await _call("unpinChatMessage", { chat_id: chatId, message_id: messageId });
 }
 
 async function _sendTyping(chatId) {
-  await _call("sendChatAction", {
-    chat_id: chatId,
-    action: "typing",
-  });
+  await _call("sendChatAction", { chat_id: chatId, action: "typing" });
 }
 
 function _replyKeyboard() {
@@ -99,24 +183,45 @@ function _replyKeyboard() {
     keyboard: [
       [{ text: "📊 Status" }, { text: "📈 Report" }],
       [{ text: "💰 PnL" }, { text: "🔔 Notif" }],
-      [{ text: "⚙️ Config" }, { text: "⏸️ Stop" }],
-      [{ text: "▶️ Resume" }],
+      [{ text: "⚙️ Config" }, { text: "⚙️ Settings" }],
+      [{ text: "⏸️ Stop" }, { text: "▶️ Resume" }],
     ],
     resize_keyboard: true,
     is_persistent: true,
   };
 }
 
-// button label routing map
 const _buttonRoutes = {
   "📊 status": "/status",
   "📈 report": "/report",
   "💰 pnl": "/pnl",
   "🔔 notif": "/menu",
   "⚙️ config": "/config",
+  "⚙️ settings": "/settings",
   "⏸️ stop": "/stop",
   "▶️ resume": "/resume",
 };
+
+// ——— settings menu config ———
+
+const SETTINGS_CATEGORIES = {
+  trading: { label: "📈 Trading", keys: ["positionSizeSol", "takeProfitPct", "stopLossPct", "maxHoldHours", "maxConcurrentPositions"] },
+  risk: { label: "🛡️ Risk", keys: ["dailyLossLimitPct", "cooldownMinutesBetweenTrades", "maxTradesPerDay"] },
+  filters: { label: "🔍 Filters", keys: ["filters.minLiquidityUsd", "filters.minVolume24hUsd", "filters.minTokenAgeHours", "filters.maxTopHolderPct"] },
+  notify: { label: "🔔 Notifications", keys: ["telegram.notify.onEntry", "telegram.notify.onExit", "telegram.notify.onScreening", "telegram.notify.onError"] },
+};
+
+function _resolveConfigValue(cfg, path) {
+  const keys = path.split(".");
+  let obj = cfg;
+  for (const k of keys) {
+    if (obj == null || typeof obj !== "object") return undefined;
+    obj = obj[k];
+  }
+  return obj;
+}
+
+// ——— polling ———
 
 let _polling = false;
 
@@ -144,61 +249,10 @@ async function pollCommands() {
         const data = cq.data || "";
 
         const authorizedChats = [_chatId, _channelId].filter(Boolean);
-        if (!authorizedChats.some((c) => String(c) === chatId)) continue;
+        if (!authorizedChats.some((c) => String(c) === String(chatId))) continue;
 
         try {
-          if (data === "confirm_stop") {
-            riskManager.setKillSwitch(true);
-            await _call("answerCallbackQuery", {
-              callback_query_id: cq.id,
-              text: "⏸️ STOP confirmed — no new entries",
-              show_alert: true,
-            });
-            await _call("editMessageText", {
-              chat_id: chatId,
-              message_id: msgId,
-              text: "🔴 KILL SWITCH ON — no new entries",
-              parse_mode: "HTML",
-            });
-          } else if (data.startsWith("toggle:")) {
-            const key = data.replace("toggle:", "");
-            const currentCfg = config.loadConfig();
-            const current = currentCfg.telegram?.notify?.[key];
-            const newVal = current === true ? "false" : "true";
-            config.setConfigValue(`telegram.notify.${key}`, newVal);
-            // answer callback
-            await _call("answerCallbackQuery", {
-              callback_query_id: cq.id,
-              text: `${key} → ${newVal === "true" ? "ON" : "OFF"}`,
-              show_alert: false,
-            });
-            // edit message to reflect new states
-            const updatedCfg = config.loadConfig();
-            const keyboard = _menuKeyboard(updatedCfg);
-            await _call("editMessageText", {
-              chat_id: chatId,
-              message_id: msgId,
-              text: "<b>🔔 Notification Toggles</b>\nTap to toggle:",
-              parse_mode: "HTML",
-              reply_markup: { inline_keyboard: keyboard },
-            });
-          } else if (data === "refresh_pnl") {
-            const reply = await _handleCommand("/pnl");
-            if (reply) {
-              await _call("editMessageText", {
-                chat_id: chatId,
-                message_id: msgId,
-                text: reply.text,
-                parse_mode: "HTML",
-                reply_markup: { inline_keyboard: reply.keyboard },
-              });
-            }
-            await _call("answerCallbackQuery", {
-              callback_query_id: cq.id,
-              text: "Refreshed",
-              show_alert: false,
-            });
-          }
+          await _handleCallback(cq, chatId, msgId, data);
         } catch (err) {
           console.log("callback handler error:", err.message);
         }
@@ -208,24 +262,20 @@ async function pollCommands() {
       const msg = u.message;
       if (!msg || !msg.text) continue;
 
-      // only respond to authorized chat
       const authorizedChats = [_chatId, _channelId].filter(Boolean);
       const chatIdStr = String(msg.chat.id);
       if (!authorizedChats.some((c) => String(c) === chatIdStr)) continue;
-
-      // ignore channel posts (already handled by mirror), only process DM commands
       if (chatIdStr !== String(_chatId)) continue;
 
       await _sendTyping(msg.chat.id);
 
-      // route button labels to commands
       let cmdText = msg.text.trim();
-      const normalized = cmdText.toLowerCase().replace(/\ufe0f/g, ""); // strip variation-selector from emoji
+      const normalized = cmdText.toLowerCase().replace(/\ufe0f/g, "");
       if (_buttonRoutes[normalized]) {
         cmdText = _buttonRoutes[normalized];
       }
 
-      const reply = await _handleCommand(cmdText);
+      const reply = await _handleCommand(cmdText, msg.chat.id);
       if (reply) {
         let payload = {
           chat_id: msg.chat.id,
@@ -240,35 +290,194 @@ async function pollCommands() {
         } else {
           payload.reply_markup = _replyKeyboard();
         }
-        await _call("sendMessage", payload);
+        const sendResult = await _call("sendMessage", payload);
+        if (reply._afterSend && sendResult?.result?.message_id) {
+          reply._afterSend(String(msg.chat.id), sendResult.result.message_id);
+        }
       }
     }
   } catch (err) {
     const status = err.response?.status;
-    if (status === 409) {
-      // 409 Conflict is normal when multiple pollers overlap — ignore
-      return;
-    }
+    if (status === 409) return;
     console.log("telegram poll error:", err.message);
   } finally {
     _polling = false;
   }
 }
 
-function _menuKeyboard(cfg) {
-  const n = cfg?.telegram?.notify || {};
-  const btn = (key, label) => ({
-    text: `${label}: ${n[key] ? "✅ ON" : "⬜ OFF"}`,
-    callback_data: `toggle:${key}`,
-  });
-  return [
-    [btn("onEntry", "Entry")],
-    [btn("onExit", "Exit")],
-    [btn("onScreening", "Screening")],
-  ];
+// ——— callback handler ———
+
+async function _handleCallback(cq, chatId, msgId, data) {
+  if (data === "confirm_stop") {
+    riskManager.setKillSwitch(true);
+    await _call("answerCallbackQuery", {
+      callback_query_id: cq.id,
+      text: "⏸️ STOP confirmed — no new entries",
+      show_alert: true,
+    });
+    await _call("editMessageText", {
+      chat_id: chatId,
+      message_id: msgId,
+      text: "🔴 KILL SWITCH ON — no new entries",
+      parse_mode: "HTML",
+    });
+    return;
+  }
+
+  if (data === "refresh_pnl") {
+    const openPositions = positions.loadOpenPositions();
+    const reply = openPositions.length === 0
+      ? { text: "No open positions.", keyboard: [] }
+      : await _buildPnlContent(openPositions);
+    await _call("editMessageText", {
+      chat_id: chatId,
+      message_id: msgId,
+      text: reply.text,
+      parse_mode: "HTML",
+      reply_markup: { inline_keyboard: reply.keyboard },
+    });
+    await _call("answerCallbackQuery", {
+      callback_query_id: cq.id,
+      text: "Refreshed",
+      show_alert: false,
+    });
+    return;
+  }
+
+  // settings category selected
+  if (data.startsWith("settings_cat:")) {
+    const category = data.replace("settings_cat:", "");
+    _settingsState[String(chatId)] = { category };
+    const kb = _buildSettingsKeysKeyboard(category);
+    await _call("editMessageText", {
+      chat_id: chatId,
+      message_id: msgId,
+      text: `<b>⚙️ ${SETTINGS_CATEGORIES[category]?.label || category}</b>\nTap a key to edit:`,
+      parse_mode: "HTML",
+      reply_markup: { inline_keyboard: kb },
+    });
+    await _call("answerCallbackQuery", {
+      callback_query_id: cq.id,
+      text: SETTINGS_CATEGORIES[category]?.label || category,
+      show_alert: false,
+    });
+    return;
+  }
+
+  // settings key selected — show value + edit prompt
+  if (data.startsWith("settings_key:")) {
+    const key = data.replace("settings_key:", "");
+    const cfg = config.loadConfig();
+    const val = _resolveConfigValue(cfg, key);
+    const prompt =
+      `<b>${key}</b>\n` +
+      `Current value: <code>${JSON.stringify(val)}</code>\n\n` +
+      `Reply with:\n<code>/set ${key} &lt;new-value&gt;</code>`;
+    await _call("editMessageText", {
+      chat_id: chatId,
+      message_id: msgId,
+      text: prompt,
+      parse_mode: "HTML",
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "🔙 Back", callback_data: `settings_back:${key.split(".")[0]}` }],
+        ],
+      },
+    });
+    await _call("answerCallbackQuery", {
+      callback_query_id: cq.id,
+      text: `Editing ${key}`,
+      show_alert: false,
+    });
+    return;
+  }
+
+  // settings back to category
+  if (data.startsWith("settings_back:")) {
+    const category = data.replace("settings_back:", "");
+    const kb = _buildSettingsKeysKeyboard(category);
+    await _call("editMessageText", {
+      chat_id: chatId,
+      message_id: msgId,
+      text: `<b>⚙️ ${SETTINGS_CATEGORIES[category]?.label || category}</b>\nTap a key to edit:`,
+      parse_mode: "HTML",
+      reply_markup: { inline_keyboard: kb },
+    });
+    await _call("answerCallbackQuery", {
+      callback_query_id: cq.id,
+      text: "Back",
+      show_alert: false,
+    });
+    return;
+  }
+
+  // settings main menu
+  if (data === "settings_main") {
+    const kb = _buildSettingsMainKeyboard();
+    await _call("editMessageText", {
+      chat_id: chatId,
+      message_id: msgId,
+      text: "<b>⚙️ Settings</b>\nChoose a category:",
+      parse_mode: "HTML",
+      reply_markup: { inline_keyboard: kb },
+    });
+    await _call("answerCallbackQuery", {
+      callback_query_id: cq.id,
+      text: "Categories",
+      show_alert: false,
+    });
+    return;
+  }
+
+  // notification toggles (legacy)
+  if (data.startsWith("toggle:")) {
+    const key = data.replace("toggle:", "");
+    const currentCfg = config.loadConfig();
+    const current = currentCfg.telegram?.notify?.[key];
+    const newVal = current === true ? "false" : "true";
+    config.setConfigValue(`telegram.notify.${key}`, newVal);
+    await _call("answerCallbackQuery", {
+      callback_query_id: cq.id,
+      text: `${key} → ${newVal === "true" ? "ON" : "OFF"}`,
+      show_alert: false,
+    });
+    const updatedCfg = config.loadConfig();
+    const keyboard = _menuKeyboard(updatedCfg);
+    await _call("editMessageText", {
+      chat_id: chatId,
+      message_id: msgId,
+      text: "<b>🔔 Notification Toggles</b>\nTap to toggle:",
+      parse_mode: "HTML",
+      reply_markup: { inline_keyboard: keyboard },
+    });
+    return;
+  }
 }
 
-async function _handleCommand(text) {
+// ——— settings keyboard builders ———
+
+function _buildSettingsMainKeyboard() {
+  return Object.entries(SETTINGS_CATEGORIES).map(([key, cat]) => [
+    { text: cat.label, callback_data: `settings_cat:${key}` },
+  ]);
+}
+
+function _buildSettingsKeysKeyboard(category) {
+  const cat = SETTINGS_CATEGORIES[category];
+  if (!cat) return [];
+  const cfg = config.loadConfig();
+  const rows = cat.keys.map((key) => {
+    const val = _resolveConfigValue(cfg, key);
+    const display = val != null ? JSON.stringify(val) : "?";
+    return [{ text: `${key.split(".").pop()}: ${display}`, callback_data: `settings_key:${key}` }];
+  });
+  rows.push([{ text: "🔙 Categories", callback_data: "settings_main" }]);
+  return rows;
+}
+
+// ——— command handler ———
+
+async function _handleCommand(text, chatId) {
   const parts = text.split(/\s+/);
   const cmd = parts[0].toLowerCase();
   const args = parts.slice(1);
@@ -286,8 +495,10 @@ async function _handleCommand(text) {
           "💰 PnL — live unrealized PnL per position",
           "🔔 Notif — toggle notification types",
           "⚙️ Config — view current settings",
+          "⚙️ Settings — multi-level config editor",
           "⏸️ Stop — kill switch (no new entries)",
           "▶️ Resume — re-enable entries",
+          "/add &lt;mint&gt; — manually enter a position",
           "/set &lt;key&gt; &lt;value&gt; — change a setting",
         ].join("\n"),
         replyKeyboard: true,
@@ -311,12 +522,14 @@ async function _handleCommand(text) {
         `<b>📊 Status</b>`,
         `Mode: ${cfg.mode}`,
         `Kill switch: ${state.killSwitch ? "🔴 ON" : "🟢 OFF"}`,
-        `Today PnL: ${state.realizedPnlTodaySol >= 0 ? "🟢" : "🔴"} ${state.realizedPnlTodaySol.toFixed(6)} SOL`,
-        `Yesterday PnL: ${state.yesterdayPnlSol >= 0 ? "🟢" : "🔴"} ${(state.yesterdayPnlSol || 0).toFixed(6)} SOL`,
-        `Trades today: ${state.tradesToday}`,
+        ``,
+        `<b>— Daily PnL —</b>`,
+        `Today: ${state.realizedPnlTodaySol >= 0 ? "🟢" : "🔴"} ${state.realizedPnlTodaySol.toFixed(6)} SOL`,
+        `Yesterday: ${(state.yesterdayPnlSol || 0) >= 0 ? "🟢" : "🔴"} ${(state.yesterdayPnlSol || 0).toFixed(6)} SOL`,
+        `Trades: ${state.tradesToday}`,
       ];
       if (openPositions.length > 0) {
-        lines.push(``, `<b>Open positions (${openPositions.length})</b>`);
+        lines.push(``, `<b>— Open (${openPositions.length}) —</b>`);
         for (const p of openPositions) {
           const held = p.entryTime ? ((Date.now() - p.entryTime) / 3600000).toFixed(1) : "?";
           let unrealized;
@@ -330,8 +543,7 @@ async function _handleCommand(text) {
           }
           const arrow = unrealized !== "?" && parseFloat(unrealized) >= 0 ? "🟢" : "🔴";
           lines.push(
-            `${escapeHtml(p.symbol)} ${arrow}`,
-            `  Entry $${(p.entryPriceEffective || 0).toFixed(8)} · ${held}h · Unreal ${unrealized}%`
+            `${arrow} ${escapeHtml(p.symbol)} — $${(p.entryPriceEffective || 0).toFixed(8)} · ${held}h · ${unrealized}%`
           );
         }
       }
@@ -356,15 +568,18 @@ async function _handleCommand(text) {
         `<b>📊 Trade Report</b>`,
         `Closed: ${report.totalClosed}`,
         `Win rate: ${report.winRatePct != null ? report.winRatePct.toFixed(1) + "%" : "?"}`,
-        `Total PnL: ${report.totalPnlSol >= 0 ? "🟢" : "🔴"} ${report.totalPnlSol.toFixed(6)} SOL`,
-        `Avg PnL: ${report.avgPnlSol != null ? report.avgPnlSol.toFixed(6) + " SOL" : "?"}`,
-        `Best: ${report.biggestWinSol != null ? report.biggestWinSol.toFixed(6) + " SOL" : "?"}`,
-        `Worst: ${report.biggestLossSol != null ? report.biggestLossSol.toFixed(6) + " SOL" : "?"}`,
-        `Breakdown:`,
-        `  SL: ${report.exitBreakdown?.SL || 0}`,
-        `  TP: ${report.exitBreakdown?.partialTP || 0}`,
-        `  Trailing: ${report.exitBreakdown?.trailing || 0}`,
-        `  MaxHold: ${report.exitBreakdown?.maxHold || 0}`,
+        ``,
+        `<b>— PnL —</b>`,
+        `Total: ${report.totalPnlSol >= 0 ? "🟢" : "🔴"} ${report.totalPnlSol.toFixed(6)} SOL`,
+        `Avg: ${report.avgPnlSol != null ? report.avgPnlSol.toFixed(6) + " SOL" : "?"}`,
+        `Best: ${report.biggestWinSol != null ? "🟢 " + report.biggestWinSol.toFixed(6) + " SOL" : "?"}`,
+        `Worst: ${report.biggestLossSol != null ? "🔴 " + report.biggestLossSol.toFixed(6) + " SOL" : "?"}`,
+        ``,
+        `<b>— Exits —</b>`,
+        `SL: ${report.exitBreakdown?.SL || 0}`,
+        `TP: ${report.exitBreakdown?.partialTP || 0}`,
+        `Trailing: ${report.exitBreakdown?.trailing || 0}`,
+        `MaxHold: ${report.exitBreakdown?.maxHold || 0}`,
       ];
       return { text: lines.join("\n") };
     }
@@ -384,6 +599,32 @@ async function _handleCommand(text) {
         `Filters: liq≥$${(cfg.filters?.minLiquidityUsd || 0).toLocaleString()} age≥${cfg.filters?.minTokenAgeHours || "?"}h`,
       ];
       return { text: lines.join("\n") };
+    }
+
+    case "/settings":
+      return {
+        text: "<b>⚙️ Settings</b>\nChoose a category:",
+        keyboard: _buildSettingsMainKeyboard(),
+      };
+
+    case "/add": {
+      if (args.length < 1) return { text: "Usage: /add &lt;mint&gt;" };
+      const mint = args[0].trim();
+      if (mint.length < 32) return { text: "Invalid mint address" };
+      const cfg = config.loadConfig();
+      const currentPrice = await jupiter.getUsdPrice(mint);
+      if (currentPrice == null) return { text: "Could not fetch price for this mint" };
+      const candidate = { mint, symbol: mint.slice(0, 8), pairAddress: null, timing: null, feeConfirm: null };
+      const newPos = await positions.openPosition(candidate, currentPrice, cfg);
+      if (!newPos) return { text: "Failed to open position (check limits/duplicates)" };
+      return {
+        text: [
+          `<b>🟢 Manual Entry · ${escapeHtml(newPos.symbol)}</b>`,
+          `Entry: $${newPos.entryPriceEffective.toFixed(8)}`,
+          `Size: ${newPos.sizeSol} SOL · Qty: ${newPos.qtyTokens.toFixed(4)}`,
+          _tokenLinks(mint),
+        ].join("\n"),
+      };
     }
 
     case "/set": {
@@ -409,51 +650,34 @@ async function _handleCommand(text) {
     case "/pnl": {
       const openPositions = positions.loadOpenPositions();
       if (openPositions.length === 0) {
-        return {
-          text: "No open positions.",
-          keyboard: [[{ text: "🔄 Refresh", callback_data: "refresh_pnl" }]],
-        };
+        return { text: "No open positions." };
       }
-      const lines = ["<b>💰 Live PnL</b>"];
-      let anyPrice = false;
-      for (const p of openPositions) {
-        const held = p.entryTime ? ((Date.now() - p.entryTime) / 3600000).toFixed(1) : "?";
-        let currentPrice;
-        try {
-          currentPrice = await jupiter.getUsdPrice(p.mint);
-        } catch {}
-        if (currentPrice != null) {
-          anyPrice = true;
-          const pnlPct = p.entryPriceEffective
-            ? (((currentPrice - p.entryPriceEffective) / p.entryPriceEffective) * 100).toFixed(2)
-            : "?";
-          const arrow = pnlPct !== "?" && parseFloat(pnlPct) >= 0 ? "🟢" : "🔴";
-          lines.push(
-            `${escapeHtml(p.symbol)} ${arrow}`,
-            `  Entry $${p.entryPriceEffective.toFixed(8)} → Current $${currentPrice.toFixed(8)}`,
-            `  PnL: ${pnlPct}% · Hold: ${held}h`
-          );
-        } else {
-          lines.push(
-            `${escapeHtml(p.symbol)} ⚪`,
-            `  Entry $${(p.entryPriceEffective || 0).toFixed(8)} → Price: ?`,
-            `  Hold: ${held}h`
-          );
-        }
-      }
-      if (!anyPrice) {
-        lines.push("(no price data)");
-      }
+      const reply = await _buildPnlContent(openPositions);
       return {
-        text: lines.join("\n"),
-        keyboard: [[{ text: "🔄 Refresh", callback_data: "refresh_pnl" }]],
+        ...reply,
+        _afterSend: (chatIdKey, msgId) => _registerPnlMessage(chatIdKey, msgId),
       };
     }
 
     default:
-      return null; // unknown command, no reply
+      return null;
   }
 }
+
+function _menuKeyboard(cfg) {
+  const n = cfg?.telegram?.notify || {};
+  const btn = (key, label) => ({
+    text: `${label}: ${n[key] ? "✅ ON" : "⬜ OFF"}`,
+    callback_data: `toggle:${key}`,
+  });
+  return [
+    [btn("onEntry", "Entry")],
+    [btn("onExit", "Exit")],
+    [btn("onScreening", "Screening")],
+  ];
+}
+
+// ——— formatting helpers ———
 
 function escapeHtml(str) {
   if (str == null) return "";
@@ -474,7 +698,8 @@ function _tokenLinks(mint) {
   ].join(" · ");
 }
 
-// notifications
+// ——— notifications ———
+
 async function notifyStart() {
   if (!_config?.telegram?.notify?.onStart) return;
   await send("🤖 darkpools-trader started (dry_run)", { reply_markup: _replyKeyboard() });
@@ -489,12 +714,11 @@ async function notifyEntry(position) {
   if (!_config?.telegram?.notify?.onEntry) return;
   const sym = escapeHtml(position.symbol || "?");
   const lines = [
-    `<b>🟢 SIM BUY · ${sym}</b>`,
-    `Entry: $${(position.entryPriceEffective || 0).toFixed(8)} (quoted $${(position.entryPriceQuoted || 0).toFixed(8)})`,
+    `<b>🟢 ENTRY · ${sym}</b>`,
+    `Price: $${(position.entryPriceEffective || 0).toFixed(8)} (quoted $${(position.entryPriceQuoted || 0).toFixed(8)})`,
     `Size: ${position.sizeSol || "?"} SOL · Qty: ${(position.qtyTokens || 0).toFixed(4)}`,
   ];
 
-  // optional metrics from candidate (attached in index.js before calling)
   const extras = [];
   const t = position._timing || {};
   if (t.rsi != null) extras.push(`RSI: ${t.rsi}`);
@@ -524,11 +748,9 @@ async function notifyExit(position, exit, isFullClose) {
   const lines = [
     `<b>${isFullClose ? "🔴 CLOSE" : "🔶 PARTIAL"} · ${sym}</b>`,
     `${escapeHtml(exit.reason || "?")} · ${exit.pctOfPosition || "?"}% @ $${(exitEff || 0).toFixed(8)}`,
-    `PnL: ${pnl >= 0 ? "🟢" : "🔴"} ${pnl.toFixed(6)} SOL (${pnlPct}%)`,
-    `Held: ${heldHours}h`,
+    `PnL: ${pnl >= 0 ? "🟢" : "🔴"} ${pnl.toFixed(6)} SOL (${pnlPct}%) · ${heldHours}h`,
   ];
 
-  // day PnL if risk state available
   try {
     const state = riskManager.loadState();
     if (state && state.realizedPnlTodaySol != null) {
@@ -580,24 +802,23 @@ async function notifyDailySummary(state, config) {
   await send(msg);
 }
 
-// check for daily rollover to send summary
 async function checkDailyRollover(state, config) {
   const dayKey = state.dayKey;
   if (_prevDayKey && dayKey !== _prevDayKey) {
-    // day just rolled over — send yesterday's summary
     await notifyDailySummary(state, config);
   }
   _prevDayKey = dayKey;
 }
 
-// self-test
+// ——— self-test ———
+
 if (require.main === module && process.argv.includes("--test")) {
   const cfgPath = require("path").resolve(__dirname, "..", "user-config.json");
   const cfg = JSON.parse(require("fs").readFileSync(cfgPath, "utf-8"));
   cfg.telegramEnabled = true;
   init(cfg);
   if (!_token) {
-    console.log("TELEGRAM_BOT_TOKEN not set — skipping test. Set it in .env to test.");
+    console.log("TELEGRAM_BOT_TOKEN not set — skipping test.");
     process.exit(0);
   }
   (async () => {
