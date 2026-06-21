@@ -237,8 +237,13 @@ async function runLoop() {
 
         if (decision && decision.called && decision.pick) {
           if (!heldMints.has(decision.pick)) {
-            pickMint = decision.pick;
-            pickCandidate = result.ranked.find((c) => c.mint === pickMint);
+            const llmCandidate = result.ranked.find((c) => c.mint === decision.pick);
+            if (llmCandidate && llmCandidate.timing && llmCandidate.timing.signal === "go") {
+              pickMint = decision.pick;
+              pickCandidate = llmCandidate;
+            } else {
+              console.log(`LLM pick ${decision.pick.slice(0, 8)}... timing not go, skipping`);
+            }
           } else {
             console.log(`LLM pick ${decision.pick.slice(0, 8)}... already held, skipping`);
           }

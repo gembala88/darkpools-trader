@@ -5,6 +5,19 @@ const execution = require("./execution");
 const DRY_RUN_FILE = path.resolve(__dirname, "..", "data", "dry-run-positions.json");
 let _testFile = null;
 
+// mint cooldown: prevent same-token re-entry within N minutes
+const _recentlyClosed = {}; // { mint: closeTime }
+
+function _isOnCooldown(mint, cooldownMs) {
+  const closed = _recentlyClosed[mint];
+  if (!closed) return false;
+  if (Date.now() - closed >= cooldownMs) {
+    delete _recentlyClosed[mint];
+    return false;
+  }
+  return true;
+}
+
 function _dataFile() {
   return _testFile || DRY_RUN_FILE;
 }
@@ -48,6 +61,13 @@ async function openPosition(candidate, currentPrice, config) {
 
   if (existing.some((p) => p.mint === candidate.mint)) {
     console.log("openPosition: duplicate mint rejected");
+    return null;
+  }
+
+  // mint cooldown: prevent same-token re-entry
+  const cooldownMs = (config.cooldownMinutesBetweenTrades || 10) * 60000;
+  if (_isOnCooldown(candidate.mint, cooldownMs)) {
+    console.log(`openPosition: ${candidate.mint.slice(0, 8)}... on cooldown, skipping`);
     return null;
   }
 
@@ -204,6 +224,7 @@ async function partialClose(position, sellPct, reason, currentPrice, config) {
   if (position.remainingPct <= 0) {
     position.status = "closed";
     position.remainingPct = 0;
+    _recentlyClosed[position.mint] = Date.now();
   }
 
   _saveAll(_loadAll().map((p) => (p.mint === position.mint && p.entryTime === position.entryTime ? position : p)));
@@ -239,6 +260,7 @@ if (require.main === module && process.argv.includes("--test")) {
   const testFile = path.resolve(__dirname, "..", "data", ".sim-test-positions.json");
   _testFile = testFile;
   fs.writeFileSync(testFile, "[]");
+  Object.keys(_recentlyClosed).forEach((k) => delete _recentlyClosed[k]);
   const clean = () => { try { fs.unlinkSync(testFile); } catch {} };
 
   const config = {
@@ -285,6 +307,7 @@ if (require.main === module && process.argv.includes("--test")) {
 
     // Reset for next test
     fs.writeFileSync(testFile, "[]");
+    clearCooldown();
 
     // 3. Partial-TP + trailing path
     const pos2 = await openPosition(dummyCandidate, 1.0, config);
@@ -310,6 +333,7 @@ if (require.main === module && process.argv.includes("--test")) {
     assert("trailing exit: total PnL positive (moon captured)", pos2.realizedPnlSol > 0);
 
     fs.writeFileSync(testFile, "[]");
+    clearCooldown();
 
     // 4. Pure trailing (moonshot) path
     const pos3 = await openPosition(dummyCandidate, 1.0, config);
@@ -323,6 +347,7 @@ if (require.main === module && process.argv.includes("--test")) {
     assert("moonshot: PnL strongly positive", pos3.realizedPnlSol > 0.2);
 
     fs.writeFileSync(testFile, "[]");
+    clearCooldown();
 
     // 5. Max-hold path
     const pos4 = await openPosition(dummyCandidate, 1.0, config);
@@ -333,6 +358,7 @@ if (require.main === module && process.argv.includes("--test")) {
     assert("maxHold: status closed", pos4.status === "closed");
 
     fs.writeFileSync(testFile, "[]");
+    clearCooldown();
 
     // 6. Exit slippage
     const pos5 = await openPosition(dummyCandidate, 1.0, config);
@@ -408,6 +434,14 @@ if (require.main === module && process.argv.includes("--test")) {
   })();
 }
 
+function clearCooldown(mint) {
+  if (mint) {
+    delete _recentlyClosed[mint];
+  } else {
+    Object.keys(_recentlyClosed).forEach((k) => delete _recentlyClosed[k]);
+  }
+}
+
 module.exports = {
   loadOpenPositions,
   openPosition,
@@ -415,4 +449,5 @@ module.exports = {
   partialClose,
   closeRemaining,
   savePosition,
+  clearCooldown,
 };
