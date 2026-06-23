@@ -54,6 +54,7 @@ let exitCode = 0;
     "tools/signals/candles.js",
     "tools/filters/safety.js",
     "tools/filters/regime.js",
+    "tools/analysis/momentum.js",
     "strategies/index.js",
   ];
   for (const dep of deps) {
@@ -68,6 +69,7 @@ let exitCode = 0;
   section("3. UNIT TESTS");
   const tests = [
     { name: "indicators:test", cmd: `node tools/indicators.js --test` },
+    { name: "momentum:test", cmd: `node tools/analysis/momentum.js --test` },
     { name: "sim:test", cmd: `node tools/positions.js --test` },
     { name: "risk:test", cmd: `node tools/riskManager.js --test` },
     { name: "report:test", cmd: `node tools/reporter.js --test` },

@@ -6,6 +6,7 @@ const strategy = require("../strategies/index");
 const safety = require("./filters/safety");
 const agent = require("../agent");
 const gmgn = require("./signals/gmgn");
+const momentum = require("./analysis/momentum");
 
 async function scan(config) {
   const candidates = await signals.getCandidates(config);
@@ -106,6 +107,14 @@ async function scan(config) {
       }
     }
     r.timing = strat.evaluate(c, candleData, tfConfig);
+
+    // momentum analysis from candle data
+    if (candleData && candleData.length > 0) {
+      const lastClose = candleData[candleData.length - 1]?.c;
+      if (lastClose != null) {
+        r.momentum = momentum.analyze(candleData, tfConfig, lastClose);
+      }
+    }
   }
 
   // LLM decision
@@ -131,8 +140,10 @@ async function scan(config) {
       ind.emaFast != null
         ? ` EMA${ind.emaFast} EMA${ind.emaSlow} RSI${ind.rsi}`
         : "";
+    const m = r.momentum || {};
+    const momStr = m.momentumTier ? ` mom=${m.momentumTier.tier} pc1h=${m.priceChange1h != null ? m.priceChange1h + "%" : "?"} v=${m.volatility != null ? m.volatility + "%" : "?"}` : "";
     console.log(
-      `  ${r.symbol || "?"} (${r.mint.slice(0, 8)}...) score=${r.score} timing=${timingStr}${indStr}` +
+      `  ${r.symbol || "?"} (${r.mint.slice(0, 8)}...) score=${r.score} timing=${timingStr}${indStr}${momStr}` +
         (fails.length ? ` FAILS: ${fails.map((f) => f.name).join(",")}` : "") +
         (skips.length ? ` SKIPS: ${skips.map((s) => `${s.name}`).join(",")}` : "")
     );
