@@ -972,17 +972,25 @@ async function notifyScreening(result, config) {
   if (!config?.telegram?.notify?.onScreening) return;
   try {
     const top = (result.ranked || []).slice(0, 3);
-    const topLine = top
-      .map((c) => {
-        const sym = escapeHtml(c.symbol || c.mint?.slice(0, 8) || "?");
-        const sig = c.timing?.signal || "?";
-        const rsi = c.timing?.indicators?.rsi != null ? ` R${c.timing.indicators.rsi}` : "";
-        return `${sym} ${sig}${rsi}`;
-      })
-      .join(" · ");
+    const topLines = top.map((c) => {
+      const sym = escapeHtml(c.symbol || c.mint?.slice(0, 8) || "?");
+      const sig = c.timing?.signal || "?";
+      const m = c.momentum || {};
+      const mom = m.momentumTier ? ` ${m.momentumTier.tier} ${m.priceChange1h != null ? m.priceChange1h + "%" : ""}` : " —";
+      if (sig === "go" || sig === "wait") {
+        const ind = c.timing?.indicators || {};
+        const rsi = ind.rsi != null ? ` R${ind.rsi}` : "";
+        const reason = (c.timing?.reasons || []).slice(0, 1).join("");
+        const shortReason = reason
+          ? reason.length > 80 ? reason.slice(0, 80) + "…" : reason
+          : "";
+        return `  ${sym} <b>${sig}</b>${mom}${rsi} — ${shortReason}`;
+      }
+      return `  ${sym} <b>${sig}</b>${mom}`;
+    });
     const msg =
       `🔍 Scan: ${result.scannedCount || "?"} · Safe: ${result.safeCount || "?"}\n` +
-      `Top: ${topLine || "—"}`;
+      topLines.join("\n");
     await _call("sendMessage", {
       chat_id: _chatId,
       text: msg,

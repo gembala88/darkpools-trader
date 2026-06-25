@@ -24,6 +24,11 @@
     "cooldownMinutesBetweenTrades",
     "strategy.trendFollowing.rsiMin",
     "strategy.trendFollowing.rsiMax",
+    "strategy.trendFollowing.minCandles",
+    "decision.eligibleTimings",
+    "filters.minTokenAgeHours",
+    "filters.minLiquidityUsd",
+    "filters.minVolume24hUsd",
     "telegram.notify.onScreening",
     "telegram.notify.onEntry",
     "telegram.notify.onExit"
@@ -111,7 +116,8 @@
   },
   "decision": {
     "eligibleTimings": [
-      "go"
+      "go",
+      "wait"
     ],
     "maxCandidatesToLLM": 5,
     "minConfidence": 0
@@ -131,7 +137,7 @@
     "wLiquidity": 0.4,
     "wVolume": 0.4,
     "wAge": 0.2,
-    "topN": 5
+    "topN": 15
   },
   "strategy": {
     "active": "trendFollowing",
@@ -142,12 +148,12 @@
       "emaFast": 20,
       "emaSlow": 50,
       "rsiPeriod": 14,
-      "rsiMin": 55,
-      "rsiMax": 70,
+      "rsiMin": 40,
+      "rsiMax": 75,
       "candleTimeframe": "hour",
       "candleAggregate": 1,
       "candleLimit": 120,
-      "minCandles": 60
+      "minCandles": 30
     }
   },
   "trending": {
